@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# build.func — shared helpers for spoolman-stack installer scripts
+
+# Colours
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+info()    { echo -e "${GREEN}[INFO]${NC}  $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+section() { echo -e "\n${BLUE}${BOLD}==> $*${NC}"; }
+
+check_root() {
+  if [[ $EUID -ne 0 ]]; then
+    error "This script must be run as root."
+    exit 1
+  fi
+}
+
+ask() {
+  # ask VAR "Prompt" "default"
+  local _var="$1" _prompt="$2" _default="$3" _input
+  if [[ -n "$_default" ]]; then
+    read -rp "$(echo -e "${CYAN}${_prompt}${NC} [${_default}]: ")" _input
+    printf -v "$_var" '%s' "${_input:-$_default}"
+  else
+    while true; do
+      read -rp "$(echo -e "${CYAN}${_prompt}${NC}: ")" _input
+      [[ -n "$_input" ]] && break
+      warn "This field is required."
+    done
+    printf -v "$_var" '%s' "$_input"
+  fi
+}

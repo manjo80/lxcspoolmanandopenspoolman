@@ -1,0 +1,25 @@
+name: ShellCheck
+
+on:
+  push:
+    paths:
+      - '**.sh'
+      - 'scripts/**'
+  pull_request:
+    paths:
+      - '**.sh'
+      - 'scripts/**'
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.'
+          severity: warning
+          format: gcc
