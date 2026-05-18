@@ -71,7 +71,31 @@ ask HOSTNAME   "LXC hostname"        "spoolman"
 ask RAM        "RAM (MB)"            "1024"
 ask CORES      "CPU cores"           "2"
 ask DISK       "Disk size (GB)"      "8"
-ask STORAGE    "Storage"             "local-lvm"
+
+# Storage picker — list every active rootdir-capable storage with free space
+mapfile -t _STOR_ROWS < <(
+  pvesm status --content rootdir 2>/dev/null \
+    | awk 'NR>1 && $3=="active" {printf "%s|%.1f GB\n", $1, $6/1024/1024}'
+)
+if [[ ${#_STOR_ROWS[@]} -eq 0 ]]; then
+  error "No active storage with 'rootdir' support found. Check 'pvesm status'."
+  exit 1
+fi
+echo
+echo -e "${CYAN}Available storages:${NC}"
+for i in "${!_STOR_ROWS[@]}"; do
+  IFS='|' read -r _name _avail <<< "${_STOR_ROWS[$i]}"
+  printf "  %d)  %-20s %s free\n" "$((i+1))" "${_name}" "${_avail}"
+done
+echo
+read -rp "$(echo -e "${CYAN}Storage choice${NC} [1]: ")" _SC
+_SC=${_SC:-1}
+if [[ ! "${_SC}" =~ ^[0-9]+$ ]] || (( _SC < 1 || _SC > ${#_STOR_ROWS[@]} )); then
+  error "Invalid choice '${_SC}'."; exit 1
+fi
+IFS='|' read -r STORAGE _ <<< "${_STOR_ROWS[$((_SC-1))]}"
+info "Using storage: ${STORAGE}"
+
 ask BRIDGE     "Network bridge"      "vmbr0"
 
 echo
