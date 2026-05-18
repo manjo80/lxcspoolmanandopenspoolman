@@ -116,6 +116,31 @@ else
   DNS_CONFIG=""
 fi
 
+echo
+echo -e "${CYAN}Root login:${NC}"
+echo    "  1) Enable root login with password"
+echo    "  2) Disable root login (SSH key only)"
+read -rp "$(echo -e "${CYAN}Choice${NC} [1]: ")" ROOT_CHOICE
+ROOT_CHOICE=${ROOT_CHOICE:-1}
+
+ROOT_PW=""
+if [[ "$ROOT_CHOICE" == "1" ]]; then
+  while true; do
+    read -rsp "$(echo -e "${CYAN}Root password${NC}: ")" ROOT_PW; echo
+    [[ -n "$ROOT_PW" ]] && break
+    warn "Password must not be empty."
+  done
+  while true; do
+    read -rsp "$(echo -e "${CYAN}Confirm root password${NC}: ")" ROOT_PW2; echo
+    [[ "$ROOT_PW" == "$ROOT_PW2" ]] && break
+    warn "Passwords do not match — try again."
+    read -rsp "$(echo -e "${CYAN}Root password${NC}: ")" ROOT_PW; echo
+  done
+  info "Root login: enabled"
+else
+  info "Root login: disabled"
+fi
+
 # ---------------------------------------------------------------------------
 # Detect template storage (first storage that supports vztmpl content)
 # ---------------------------------------------------------------------------
@@ -160,17 +185,21 @@ section "Creating LXC container ${CTID}"
 if pct status "${CTID}" &>/dev/null; then
   warn "Container ${CTID} already exists — skipping creation."
 else
+  PCT_ARGS=(
+    "${CTID}" "${TEMPLATE_PATH}"
+    --hostname  "${HOSTNAME}"
+    --memory    "${RAM}"
+    --cores     "${CORES}"
+    --rootfs    "${STORAGE}:${DISK}"
+    --net0      "name=eth0,bridge=${BRIDGE},${NET_CONFIG}"
+    --ostype    debian
+    --unprivileged 1
+    --features  nesting=1
+  )
+  [[ -n "$ROOT_PW" ]] && PCT_ARGS+=(--password "${ROOT_PW}")
   # shellcheck disable=SC2086
-  pct create "${CTID}" "${TEMPLATE_PATH}" \
-    --hostname  "${HOSTNAME}" \
-    --memory    "${RAM}" \
-    --cores     "${CORES}" \
-    --rootfs    "${STORAGE}:${DISK}" \
-    --net0      "name=eth0,bridge=${BRIDGE},${NET_CONFIG}" \
-    --ostype    debian \
-    --unprivileged 1 \
-    --features  nesting=1 \
-    ${DNS_CONFIG}
+  [[ -n "$DNS_CONFIG" ]] && PCT_ARGS+=(${DNS_CONFIG})
+  pct create "${PCT_ARGS[@]}"
   info "Container ${CTID} created."
 fi
 
