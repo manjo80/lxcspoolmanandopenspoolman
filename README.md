@@ -36,7 +36,7 @@ The Debian 12 LXC template is downloaded automatically if it is not already pres
 Run **on the Proxmox host** as root:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/Manjo80/spoolman-stack/main/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Manjo80/lxcspoolmanandopenspoolman/main/install.sh)"
 ```
 
 The script will interactively ask for:
