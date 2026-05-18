@@ -71,7 +71,31 @@ ask HOSTNAME   "LXC hostname"        "spoolman"
 ask RAM        "RAM (MB)"            "1024"
 ask CORES      "CPU cores"           "2"
 ask DISK       "Disk size (GB)"      "8"
-ask STORAGE    "Storage"             "local-lvm"
+
+# Storage picker — list every active rootdir-capable storage with free space
+mapfile -t _STOR_ROWS < <(
+  pvesm status --content rootdir 2>/dev/null \
+    | awk 'NR>1 && $3=="active" {printf "%s|%.1f GB\n", $1, $6/1024/1024}'
+)
+if [[ ${#_STOR_ROWS[@]} -eq 0 ]]; then
+  error "No active storage with 'rootdir' support found. Check 'pvesm status'."
+  exit 1
+fi
+echo
+echo -e "${CYAN}Available storages:${NC}"
+for i in "${!_STOR_ROWS[@]}"; do
+  IFS='|' read -r _name _avail <<< "${_STOR_ROWS[$i]}"
+  printf "  %d)  %-20s %s free\n" "$((i+1))" "${_name}" "${_avail}"
+done
+echo
+read -rp "$(echo -e "${CYAN}Storage choice${NC} [1]: ")" _SC
+_SC=${_SC:-1}
+if [[ ! "${_SC}" =~ ^[0-9]+$ ]] || (( _SC < 1 || _SC > ${#_STOR_ROWS[@]} )); then
+  error "Invalid choice '${_SC}'."; exit 1
+fi
+IFS='|' read -r STORAGE _ <<< "${_STOR_ROWS[$((_SC-1))]}"
+info "Using storage: ${STORAGE}"
+
 ask BRIDGE     "Network bridge"      "vmbr0"
 
 echo
@@ -90,6 +114,31 @@ if [[ "$IP_CHOICE" == "2" ]]; then
 else
   NET_CONFIG="ip=dhcp"
   DNS_CONFIG=""
+fi
+
+echo
+echo -e "${CYAN}Root login:${NC}"
+echo    "  1) Enable root login with password"
+echo    "  2) Disable root login (SSH key only)"
+read -rp "$(echo -e "${CYAN}Choice${NC} [1]: ")" ROOT_CHOICE
+ROOT_CHOICE=${ROOT_CHOICE:-1}
+
+ROOT_PW=""
+if [[ "$ROOT_CHOICE" == "1" ]]; then
+  while true; do
+    read -rsp "$(echo -e "${CYAN}Root password${NC}: ")" ROOT_PW; echo
+    [[ -n "$ROOT_PW" ]] && break
+    warn "Password must not be empty."
+  done
+  while true; do
+    read -rsp "$(echo -e "${CYAN}Confirm root password${NC}: ")" ROOT_PW2; echo
+    [[ "$ROOT_PW" == "$ROOT_PW2" ]] && break
+    warn "Passwords do not match — try again."
+    read -rsp "$(echo -e "${CYAN}Root password${NC}: ")" ROOT_PW; echo
+  done
+  info "Root login: enabled"
+else
+  info "Root login: disabled"
 fi
 
 # ---------------------------------------------------------------------------
@@ -136,17 +185,21 @@ section "Creating LXC container ${CTID}"
 if pct status "${CTID}" &>/dev/null; then
   warn "Container ${CTID} already exists — skipping creation."
 else
+  PCT_ARGS=(
+    "${CTID}" "${TEMPLATE_PATH}"
+    --hostname  "${HOSTNAME}"
+    --memory    "${RAM}"
+    --cores     "${CORES}"
+    --rootfs    "${STORAGE}:${DISK}"
+    --net0      "name=eth0,bridge=${BRIDGE},${NET_CONFIG}"
+    --ostype    debian
+    --unprivileged 1
+    --features  nesting=1
+  )
+  [[ -n "$ROOT_PW" ]] && PCT_ARGS+=(--password "${ROOT_PW}")
   # shellcheck disable=SC2086
-  pct create "${CTID}" "${TEMPLATE_PATH}" \
-    --hostname  "${HOSTNAME}" \
-    --memory    "${RAM}" \
-    --cores     "${CORES}" \
-    --rootfs    "${STORAGE}:${DISK}" \
-    --net0      "name=eth0,bridge=${BRIDGE},${NET_CONFIG}" \
-    --ostype    debian \
-    --unprivileged 1 \
-    --features  nesting=1 \
-    ${DNS_CONFIG}
+  [[ -n "$DNS_CONFIG" ]] && PCT_ARGS+=(${DNS_CONFIG})
+  pct create "${PCT_ARGS[@]}"
   info "Container ${CTID} created."
 fi
 
