@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lxc_install.sh — runs inside the Debian 12 LXC container
+# lxc_install.sh — runs inside the Debian 13 LXC container
 # Installs Spoolman + OpenSpoolMan with Nginx HTTPS and self-signed CA
 set -euo pipefail
 
