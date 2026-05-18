@@ -142,6 +142,41 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Spoolman stack configuration
+# ---------------------------------------------------------------------------
+section "Spoolman Stack Configuration"
+
+ask SPOOL_HOST   "Hostname for Spoolman (DNS)"       "spoolman.home"
+ask OSPOOL_HOST  "Hostname for OpenSpoolMan (DNS)"   "openspoolman.home"
+ask SPOOL_HTTPS  "HTTPS port for Spoolman Nginx"     "7913"
+ask OSPOOL_HTTPS "HTTPS port for OpenSpoolMan Nginx" "8443"
+ask SPOOL_PORT   "Internal port for Spoolman"        "7912"
+ask OSPOOL_PORT  "Internal port for OpenSpoolMan"    "8000"
+
+echo
+info "Bambu printer credentials (required)"
+ask PRINTER_IP     "Bambu printer IP"       ""
+ask PRINTER_SERIAL "Bambu printer serial"   ""
+ask ACCESS_CODE    "Bambu LAN access code"  ""
+
+# ---------------------------------------------------------------------------
+# Confirmation
+# ---------------------------------------------------------------------------
+echo
+echo -e "${BOLD}Summary:${NC}"
+echo    "  Container ID  : ${CTID}  (${CORES} cores, ${RAM} MB RAM, ${DISK} GB on ${STORAGE})"
+echo    "  Hostname      : ${HOSTNAME}  bridge ${BRIDGE}  net ${NET_CONFIG}"
+echo    "  Root login    : $( [[ -n "$ROOT_PW" ]] && echo enabled || echo disabled )"
+echo    "  Spoolman      : ${SPOOL_HOST}  HTTPS :${SPOOL_HTTPS} → :${SPOOL_PORT}"
+echo    "  OpenSpoolMan  : ${OSPOOL_HOST}  HTTPS :${OSPOOL_HTTPS} → :${OSPOOL_PORT}"
+echo    "  Printer IP    : ${PRINTER_IP}"
+echo    "  Serial        : ${PRINTER_SERIAL}"
+echo    "  Access code   : ${ACCESS_CODE}"
+echo
+read -rp "$(echo -e "${YELLOW}Proceed? [y/N]: ${NC}")" _CONFIRM
+[[ "${_CONFIRM,,}" =~ ^y ]] || { info "Aborted."; exit 0; }
+
+# ---------------------------------------------------------------------------
 # Detect template storage (first storage that supports vztmpl content)
 # ---------------------------------------------------------------------------
 section "Detecting template storage"
@@ -226,10 +261,25 @@ done
 # ---------------------------------------------------------------------------
 section "Running stack installer inside container"
 
-LXC_SCRIPT_URL="https://raw.githubusercontent.com/Manjo80/spoolman-stack/main/scripts/lxc_install.sh"
+LXC_SCRIPT_URL="https://raw.githubusercontent.com/Manjo80/lxcspoolmanandopenspoolman/main/scripts/lxc_install.sh"
 
-pct exec "${CTID}" -- bash -c "apt-get install -y --no-install-recommends curl ca-certificates &>/dev/null && \
-  bash <(curl -fsSL '${LXC_SCRIPT_URL}')"
+pct exec "${CTID}" -- env \
+  SPOOL_HOST="${SPOOL_HOST}" \
+  OSPOOL_HOST="${OSPOOL_HOST}" \
+  SPOOL_HTTPS="${SPOOL_HTTPS}" \
+  OSPOOL_HTTPS="${OSPOOL_HTTPS}" \
+  SPOOL_PORT="${SPOOL_PORT}" \
+  OSPOOL_PORT="${OSPOOL_PORT}" \
+  PRINTER_IP="${PRINTER_IP}" \
+  PRINTER_SERIAL="${PRINTER_SERIAL}" \
+  ACCESS_CODE="${ACCESS_CODE}" \
+  bash -c "
+    set -euo pipefail
+    apt-get install -y --no-install-recommends curl ca-certificates > /dev/null
+    curl -fsSL '${LXC_SCRIPT_URL}' -o /tmp/lxc_install.sh
+    bash /tmp/lxc_install.sh
+    rm -f /tmp/lxc_install.sh
+  "
 
 # ---------------------------------------------------------------------------
 # Host-side summary

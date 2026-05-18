@@ -54,40 +54,46 @@ echo
 check_root
 
 # ---------------------------------------------------------------------------
-# Gather configuration
+# Configuration — use env vars when called from install.sh, prompt otherwise
 # ---------------------------------------------------------------------------
-section "Configuration"
 
-ask SPOOL_HOST    "Hostname for Spoolman (DNS)"       "spoolman.home"
-ask OSPOOL_HOST   "Hostname for OpenSpoolMan (DNS)"   "openspoolman.home"
-ask SPOOL_HTTPS   "HTTPS port for Spoolman Nginx"     "7913"
-ask OSPOOL_HTTPS  "HTTPS port for OpenSpoolMan Nginx" "8443"
-ask SPOOL_PORT    "Internal port for Spoolman"        "7912"
-ask OSPOOL_PORT   "Internal port for OpenSpoolMan"    "8000"
+# Required vars — check if they were supplied by the caller
+if [[ -z "${PRINTER_IP:-}" || -z "${PRINTER_SERIAL:-}" || -z "${ACCESS_CODE:-}" ]]; then
+  section "Configuration"
+  ask SPOOL_HOST    "Hostname for Spoolman (DNS)"       "spoolman.home"
+  ask OSPOOL_HOST   "Hostname for OpenSpoolMan (DNS)"   "openspoolman.home"
+  ask SPOOL_HTTPS   "HTTPS port for Spoolman Nginx"     "7913"
+  ask OSPOOL_HTTPS  "HTTPS port for OpenSpoolMan Nginx" "8443"
+  ask SPOOL_PORT    "Internal port for Spoolman"        "7912"
+  ask OSPOOL_PORT   "Internal port for OpenSpoolMan"    "8000"
+  echo
+  info "Bambu printer credentials (required)"
+  ask PRINTER_IP     "Bambu printer IP"     ""
+  ask PRINTER_SERIAL "Bambu printer serial" ""
+  ask ACCESS_CODE    "Bambu LAN access code" ""
 
-echo
-info "Bambu printer credentials (required)"
-
-ask PRINTER_IP     "Bambu printer IP"          ""
-ask PRINTER_SERIAL "Bambu printer serial"       ""
-ask ACCESS_CODE    "Bambu LAN access code"      ""
-
-# Detect container IP for display in summary
-SERVER_IP=$(hostname -I | awk '{print $1}')
-
-# ---------------------------------------------------------------------------
-# Confirmation
-# ---------------------------------------------------------------------------
-echo
-echo -e "${BOLD}Summary:${NC}"
-echo    "  Spoolman host   : ${SPOOL_HOST}  (HTTPS :${SPOOL_HTTPS} → 127.0.0.1:${SPOOL_PORT})"
-echo    "  OpenSpoolMan    : ${OSPOOL_HOST}  (HTTPS :${OSPOOL_HTTPS} → 127.0.0.1:${OSPOOL_PORT})"
-echo    "  Printer IP      : ${PRINTER_IP}"
-echo    "  Serial          : ${PRINTER_SERIAL}"
-echo    "  Access code     : ${ACCESS_CODE}"
-echo
-read -rp "$(echo -e "${YELLOW}Proceed with installation? [y/N]: ${NC}")" CONFIRM
-[[ "${CONFIRM,,}" =~ ^y ]] || { info "Aborted."; exit 0; }
+  SERVER_IP=$(hostname -I | awk '{print $1}')
+  echo
+  echo -e "${BOLD}Summary:${NC}"
+  echo "  Spoolman host   : ${SPOOL_HOST}  (HTTPS :${SPOOL_HTTPS} → 127.0.0.1:${SPOOL_PORT})"
+  echo "  OpenSpoolMan    : ${OSPOOL_HOST}  (HTTPS :${OSPOOL_HTTPS} → 127.0.0.1:${OSPOOL_PORT})"
+  echo "  Printer IP      : ${PRINTER_IP}"
+  echo "  Serial          : ${PRINTER_SERIAL}"
+  echo "  Access code     : ${ACCESS_CODE}"
+  echo
+  read -rp "$(echo -e "${YELLOW}Proceed with installation? [y/N]: ${NC}")" CONFIRM
+  [[ "${CONFIRM,,}" =~ ^y ]] || { info "Aborted."; exit 0; }
+else
+  # Apply defaults for optional vars that may not have been passed
+  SPOOL_HOST="${SPOOL_HOST:-spoolman.home}"
+  OSPOOL_HOST="${OSPOOL_HOST:-openspoolman.home}"
+  SPOOL_HTTPS="${SPOOL_HTTPS:-7913}"
+  OSPOOL_HTTPS="${OSPOOL_HTTPS:-8443}"
+  SPOOL_PORT="${SPOOL_PORT:-7912}"
+  OSPOOL_PORT="${OSPOOL_PORT:-8000}"
+  SERVER_IP=$(hostname -I | awk '{print $1}')
+  info "Non-interactive mode — using configuration from installer."
+fi
 
 # ---------------------------------------------------------------------------
 # 1. System packages
