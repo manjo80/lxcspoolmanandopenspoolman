@@ -275,6 +275,7 @@ pct exec "${CTID}" -- env \
   ACCESS_CODE="${ACCESS_CODE}" \
   bash -c "
     set -euo pipefail
+    apt-get update -q
     apt-get install -y --no-install-recommends curl ca-certificates > /dev/null
     curl -fsSL '${LXC_SCRIPT_URL}' -o /tmp/lxc_install.sh
     bash /tmp/lxc_install.sh
