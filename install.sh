@@ -93,17 +93,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Detect template storage (first storage that supports vztmpl content)
+# ---------------------------------------------------------------------------
+section "Detecting template storage"
+
+TMPL_STORAGE=$(pvesm status --content vztmpl 2>/dev/null | awk 'NR>1 {print $1}' | head -1)
+if [[ -z "${TMPL_STORAGE}" ]]; then
+  error "No storage with vztmpl support found. Check 'pvesm status'."
+  exit 1
+fi
+info "Using template storage: ${TMPL_STORAGE}"
+
+# ---------------------------------------------------------------------------
 # Debian 13 template
 # ---------------------------------------------------------------------------
-section "Checking Debian 12 template"
+section "Checking Debian 13 template"
 
-TEMPLATE_NAME="debian-13-standard_13.1-2_amd64.tar.zst"
-TEMPLATE_PATH="local:vztmpl/${TEMPLATE_NAME}"
+pveam update
+TEMPLATE_NAME=$(pveam available --section system 2>/dev/null \
+  | awk '{print $2}' | grep "^debian-13" | sort -V | tail -1)
 
-if ! pveam list local 2>/dev/null | grep -q "${TEMPLATE_NAME}"; then
+if [[ -z "${TEMPLATE_NAME}" ]]; then
+  error "No Debian 13 template found in pveam available. Run 'pveam update' manually and retry."
+  exit 1
+fi
+info "Latest Debian 13 template: ${TEMPLATE_NAME}"
+
+TEMPLATE_PATH="${TMPL_STORAGE}:vztmpl/${TEMPLATE_NAME}"
+
+if ! pveam list "${TMPL_STORAGE}" 2>/dev/null | grep -q "${TEMPLATE_NAME}"; then
   info "Template not found — downloading…"
-  pveam update
-  pveam download local "${TEMPLATE_NAME}"
+  pveam download "${TMPL_STORAGE}" "${TEMPLATE_NAME}"
 else
   info "Template already present."
 fi
