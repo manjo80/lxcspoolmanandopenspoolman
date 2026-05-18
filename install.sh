@@ -148,8 +148,6 @@ section "Spoolman Stack Configuration"
 
 ask SPOOL_HOST   "Hostname for Spoolman (DNS)"       "spoolman.home"
 ask OSPOOL_HOST  "Hostname for OpenSpoolMan (DNS)"   "openspoolman.home"
-ask SPOOL_HTTPS  "HTTPS port for Spoolman Nginx"     "7913"
-ask OSPOOL_HTTPS "HTTPS port for OpenSpoolMan Nginx" "8443"
 ask SPOOL_PORT   "Internal port for Spoolman"        "7912"
 ask OSPOOL_PORT  "Internal port for OpenSpoolMan"    "8000"
 
@@ -167,8 +165,8 @@ echo -e "${BOLD}Summary:${NC}"
 echo    "  Container ID  : ${CTID}  (${CORES} cores, ${RAM} MB RAM, ${DISK} GB on ${STORAGE})"
 echo    "  Hostname      : ${HOSTNAME}  bridge ${BRIDGE}  net ${NET_CONFIG}"
 echo    "  Root login    : $( [[ -n "$ROOT_PW" ]] && echo enabled || echo disabled )"
-echo    "  Spoolman      : ${SPOOL_HOST}  HTTPS :${SPOOL_HTTPS} → :${SPOOL_PORT}"
-echo    "  OpenSpoolMan  : ${OSPOOL_HOST}  HTTPS :${OSPOOL_HTTPS} → :${OSPOOL_PORT}"
+echo    "  Spoolman      : https://${SPOOL_HOST}  (internal :${SPOOL_PORT})"
+echo    "  OpenSpoolMan  : https://${OSPOOL_HOST}  (internal :${OSPOOL_PORT})"
 echo    "  Printer IP    : ${PRINTER_IP}"
 echo    "  Serial        : ${PRINTER_SERIAL}"
 echo    "  Access code   : ${ACCESS_CODE}"
@@ -264,10 +262,9 @@ section "Running stack installer inside container"
 LXC_SCRIPT_URL="https://raw.githubusercontent.com/Manjo80/lxcspoolmanandopenspoolman/main/scripts/lxc_install.sh"
 
 pct exec "${CTID}" -- env \
+  DEBIAN_FRONTEND=noninteractive \
   SPOOL_HOST="${SPOOL_HOST}" \
   OSPOOL_HOST="${OSPOOL_HOST}" \
-  SPOOL_HTTPS="${SPOOL_HTTPS}" \
-  OSPOOL_HTTPS="${OSPOOL_HTTPS}" \
   SPOOL_PORT="${SPOOL_PORT}" \
   OSPOOL_PORT="${OSPOOL_PORT}" \
   PRINTER_IP="${PRINTER_IP}" \

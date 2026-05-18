@@ -60,35 +60,30 @@ check_root
 # Required vars — check if they were supplied by the caller
 if [[ -z "${PRINTER_IP:-}" || -z "${PRINTER_SERIAL:-}" || -z "${ACCESS_CODE:-}" ]]; then
   section "Configuration"
-  ask SPOOL_HOST    "Hostname for Spoolman (DNS)"       "spoolman.home"
-  ask OSPOOL_HOST   "Hostname for OpenSpoolMan (DNS)"   "openspoolman.home"
-  ask SPOOL_HTTPS   "HTTPS port for Spoolman Nginx"     "7913"
-  ask OSPOOL_HTTPS  "HTTPS port for OpenSpoolMan Nginx" "8443"
-  ask SPOOL_PORT    "Internal port for Spoolman"        "7912"
-  ask OSPOOL_PORT   "Internal port for OpenSpoolMan"    "8000"
+  ask SPOOL_HOST    "Hostname for Spoolman (DNS)"     "spoolman.home"
+  ask OSPOOL_HOST   "Hostname for OpenSpoolMan (DNS)" "openspoolman.home"
+  ask SPOOL_PORT    "Internal port for Spoolman"      "7912"
+  ask OSPOOL_PORT   "Internal port for OpenSpoolMan"  "8000"
   echo
   info "Bambu printer credentials (required)"
-  ask PRINTER_IP     "Bambu printer IP"     ""
-  ask PRINTER_SERIAL "Bambu printer serial" ""
+  ask PRINTER_IP     "Bambu printer IP"      ""
+  ask PRINTER_SERIAL "Bambu printer serial"  ""
   ask ACCESS_CODE    "Bambu LAN access code" ""
 
   SERVER_IP=$(hostname -I | awk '{print $1}')
   echo
   echo -e "${BOLD}Summary:${NC}"
-  echo "  Spoolman host   : ${SPOOL_HOST}  (HTTPS :${SPOOL_HTTPS} → 127.0.0.1:${SPOOL_PORT})"
-  echo "  OpenSpoolMan    : ${OSPOOL_HOST}  (HTTPS :${OSPOOL_HTTPS} → 127.0.0.1:${OSPOOL_PORT})"
-  echo "  Printer IP      : ${PRINTER_IP}"
-  echo "  Serial          : ${PRINTER_SERIAL}"
-  echo "  Access code     : ${ACCESS_CODE}"
+  echo "  Spoolman      : https://${SPOOL_HOST}  (internal :${SPOOL_PORT})"
+  echo "  OpenSpoolMan  : https://${OSPOOL_HOST}  (internal :${OSPOOL_PORT})"
+  echo "  Printer IP    : ${PRINTER_IP}"
+  echo "  Serial        : ${PRINTER_SERIAL}"
+  echo "  Access code   : ${ACCESS_CODE}"
   echo
   read -rp "$(echo -e "${YELLOW}Proceed with installation? [y/N]: ${NC}")" CONFIRM
   [[ "${CONFIRM,,}" =~ ^y ]] || { info "Aborted."; exit 0; }
 else
-  # Apply defaults for optional vars that may not have been passed
   SPOOL_HOST="${SPOOL_HOST:-spoolman.home}"
   OSPOOL_HOST="${OSPOOL_HOST:-openspoolman.home}"
-  SPOOL_HTTPS="${SPOOL_HTTPS:-7913}"
-  OSPOOL_HTTPS="${OSPOOL_HTTPS:-8443}"
   SPOOL_PORT="${SPOOL_PORT:-7912}"
   OSPOOL_PORT="${OSPOOL_PORT:-8000}"
   SERVER_IP=$(hostname -I | awk '{print $1}')
@@ -99,7 +94,12 @@ fi
 # 1. System packages
 # ---------------------------------------------------------------------------
 section "Installing system packages"
+export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
+apt-get install -y --no-install-recommends locales > /dev/null
+sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+locale-gen > /dev/null
+export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 apt-get install -y --no-install-recommends \
   git curl wget \
   python3 python3-venv python3-pip \
@@ -260,7 +260,7 @@ if [[ -f "${OSPOOL_DIR}/requirements.txt" ]]; then
 fi
 
 cat > "${OSPOOL_DIR}/.env" <<EOF
-BASE_URL=https://${OSPOOL_HOST}:${OSPOOL_HTTPS}
+BASE_URL=https://${OSPOOL_HOST}
 SPOOLMAN_URL=http://127.0.0.1:${SPOOL_PORT}
 PORT=${OSPOOL_PORT}
 BAMBU_PRINTER_IP=${PRINTER_IP}
@@ -307,7 +307,7 @@ mkdir -p /var/www/html
 # Spoolman vhost
 cat > /etc/nginx/sites-available/spoolman <<EOF
 server {
-    listen ${SPOOL_HTTPS} ssl;
+    listen 443 ssl;
     server_name ${SPOOL_HOST};
 
     ssl_certificate     ${SSL_DIR}/spoolman.crt;
@@ -331,7 +331,7 @@ EOF
 # OpenSpoolMan vhost
 cat > /etc/nginx/sites-available/openspoolman <<EOF
 server {
-    listen ${OSPOOL_HTTPS} ssl;
+    listen 443 ssl;
     server_name ${OSPOOL_HOST};
 
     ssl_certificate     ${SSL_DIR}/openspoolman.crt;
@@ -403,12 +403,10 @@ cat <<EOF
 ============================================================
 
   Spoolman:
-    https://${SPOOL_HOST}:${SPOOL_HTTPS}
-    https://${SERVER_IP}:${SPOOL_HTTPS}
+    https://${SPOOL_HOST}
 
   OpenSpoolMan:
-    https://${OSPOOL_HOST}:${OSPOOL_HTTPS}
-    https://${SERVER_IP}:${OSPOOL_HTTPS}
+    https://${OSPOOL_HOST}
 
   CA certificate (install this on your devices):
     http://${SERVER_IP}:8080/spoolman-ca.crt
