@@ -68,7 +68,7 @@ NEXT_ID=$(pvesh get /cluster/nextid 2>/dev/null || echo "200")
 
 ask CTID       "Container ID"        "${NEXT_ID}"
 ask HOSTNAME   "LXC hostname"        "spoolman"
-ask RAM        "RAM (MB)"            "512"
+ask RAM        "RAM (MB)"            "1024"
 ask CORES      "CPU cores"           "2"
 ask DISK       "Disk size (GB)"      "8"
 ask STORAGE    "Storage"             "local-lvm"
@@ -93,11 +93,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Debian 12 template
+# Debian 13 template
 # ---------------------------------------------------------------------------
 section "Checking Debian 12 template"
 
-TEMPLATE_NAME="debian-12-standard_12.7-1_amd64.tar.zst"
+TEMPLATE_NAME="debian-13-standard_13.1-2_amd64.tar.zst"
 TEMPLATE_PATH="local:vztmpl/${TEMPLATE_NAME}"
 
 if ! pveam list local 2>/dev/null | grep -q "${TEMPLATE_NAME}"; then
