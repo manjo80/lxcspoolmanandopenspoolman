@@ -380,7 +380,73 @@ info "Testing Nginx configuration"
 nginx -t
 
 # ---------------------------------------------------------------------------
-# 7. Enable and start services
+# 7. Update command  (/usr/local/bin/update)
+# ---------------------------------------------------------------------------
+section "Installing update command"
+
+cat > /usr/local/bin/update <<'UPDATESCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
+
+info()    { echo -e "${GREEN}[INFO]${NC}  $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+section() { echo -e "\n${BLUE}${BOLD}==> $*${NC}"; }
+
+[[ $EUID -ne 0 ]] && { echo -e "${RED}[ERROR]${NC} Run as root."; exit 1; }
+
+update_repo() {
+  local NAME="$1" DIR="$2" SERVICE="$3"
+  section "Checking ${NAME}"
+
+  if [[ ! -d "${DIR}/.git" ]]; then
+    warn "${DIR} is not a git repo — skipping."
+    return
+  fi
+
+  local BEFORE
+  BEFORE=$(git -C "${DIR}" rev-parse HEAD)
+  git -C "${DIR}" fetch --quiet origin
+
+  local REMOTE
+  REMOTE=$(git -C "${DIR}" rev-parse '@{u}' 2>/dev/null || \
+           git -C "${DIR}" rev-parse origin/HEAD 2>/dev/null || \
+           git -C "${DIR}" rev-parse origin/main 2>/dev/null)
+
+  if [[ "$BEFORE" == "$REMOTE" ]]; then
+    info "${NAME}: already up to date (${BEFORE:0:7})."
+    return
+  fi
+
+  info "${NAME}: update found (${BEFORE:0:7} → ${REMOTE:0:7}) — applying…"
+  systemctl stop "${SERVICE}"
+
+  git -C "${DIR}" pull --ff-only --quiet
+
+  if [[ -f "${DIR}/requirements.txt" && -x "${DIR}/venv/bin/pip" ]]; then
+    info "Updating Python dependencies…"
+    "${DIR}/venv/bin/pip" install --quiet --upgrade pip
+    "${DIR}/venv/bin/pip" install --quiet -r "${DIR}/requirements.txt"
+  fi
+
+  systemctl start "${SERVICE}"
+  info "${NAME}: updated and restarted."
+}
+
+update_repo "Spoolman"     "/opt/spoolman"     "spoolman"
+update_repo "OpenSpoolMan" "/opt/openspoolman" "openspoolman"
+
+section "Service status"
+systemctl --no-pager status spoolman openspoolman --lines=0
+UPDATESCRIPT
+
+chmod +x /usr/local/bin/update
+info "'update' command installed — run it as root to update both services."
+
+# ---------------------------------------------------------------------------
+# 8. Enable and start services
 # ---------------------------------------------------------------------------
 section "Starting services"
 
@@ -393,7 +459,7 @@ systemctl enable --now nginx
 sleep 3
 
 # ---------------------------------------------------------------------------
-# 8. Summary
+# 9. Summary
 # ---------------------------------------------------------------------------
 echo
 echo -e "${GREEN}${BOLD}"
