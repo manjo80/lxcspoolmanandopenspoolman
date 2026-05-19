@@ -129,7 +129,9 @@ if [[ ! -f "${SSL_DIR}/ca.key" ]]; then
   openssl req -new -x509 -days 3650 \
     -key "${SSL_DIR}/ca.key" \
     -out "${SSL_DIR}/ca.crt" \
-    -subj "/CN=Spoolman-Stack-CA/O=SpoolmanStack/C=DE"
+    -subj "/CN=Spoolman-Stack-CA/O=SpoolmanStack/C=DE" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign"
 fi
 
 make_cert() {
@@ -304,8 +306,7 @@ info "Installing OpenSpoolMan dependencies"
 # Write config.env — this is the filename config.py loads via load_dotenv().
 cat > "${OSPOOL_DIR}/config.env" <<EOF
 OPENSPOOLMAN_BASE_URL=https://${SERVER_IP}:8443
-SPOOLMAN_BASE_URL=https://${SERVER_IP}
-REQUESTS_CA_BUNDLE=/etc/ssl/spoolman-stack/ca.crt
+SPOOLMAN_BASE_URL=http://127.0.0.1:${SPOOL_PORT}
 PORT=${OSPOOL_PORT}
 PRINTER_IP=${PRINTER_IP}
 PRINTER_ID=${PRINTER_SERIAL}
