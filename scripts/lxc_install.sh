@@ -94,9 +94,9 @@ fi
 # 1. System packages
 # ---------------------------------------------------------------------------
 section "Installing system packages"
-export DEBIAN_FRONTEND=noninteractive LC_ALL=C
+export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y --no-install-recommends locales > /dev/null
+LC_ALL=C apt-get install -y --no-install-recommends locales > /dev/null
 echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen > /dev/null
 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
@@ -592,7 +592,9 @@ section "Starting services"
 systemctl daemon-reload
 systemctl enable --now spoolman
 systemctl enable --now openspoolman
-systemctl enable --now nginx
+# nginx may already be running from package install; restart to load the new site configs
+systemctl enable nginx
+systemctl restart nginx
 
 # Brief pause to let services come up
 sleep 3
