@@ -183,12 +183,20 @@ SPOOL_DATA="/var/lib/spoolman"
 mkdir -p "${SPOOL_DATA}"
 chown spoolman:spoolman "${SPOOL_DATA}"
 
-if [[ -d "${SPOOL_DIR}/.git" ]]; then
-  info "Updating existing Spoolman clone"
-  git -C "${SPOOL_DIR}" pull --ff-only
+SPOOL_RELEASE=$(curl -fsSL https://api.github.com/repos/Donkie/Spoolman/releases/latest \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])')
+info "Latest Spoolman release: ${SPOOL_RELEASE}"
+
+if [[ -d "${SPOOL_DIR}/client/dist" ]]; then
+  info "Spoolman already installed — skipping download"
 else
-  info "Cloning Spoolman"
-  git clone --depth 1 https://github.com/Donkie/Spoolman.git "${SPOOL_DIR}"
+  info "Downloading Spoolman ${SPOOL_RELEASE}"
+  curl -fsSL "https://github.com/Donkie/Spoolman/releases/download/${SPOOL_RELEASE}/spoolman.zip" \
+    -o /tmp/spoolman.zip
+  rm -rf "${SPOOL_DIR}"
+  mkdir -p "${SPOOL_DIR}"
+  unzip -q /tmp/spoolman.zip -d "${SPOOL_DIR}"
+  rm -f /tmp/spoolman.zip
 fi
 
 # uv is required by both scripts/start.sh and pyproject.toml paths
@@ -452,9 +460,63 @@ section() { echo -e "\n${BLUE}${BOLD}==> $*${NC}"; }
 
 [[ $EUID -ne 0 ]] && { echo -e "${RED}[ERROR]${NC} Run as root."; exit 1; }
 
-update_repo() {
-  local NAME="$1" DIR="$2" SERVICE="$3"
-  section "Checking ${NAME}"
+update_spoolman() {
+  section "Checking Spoolman"
+  local DIR="/opt/spoolman"
+  local CURRENT="" LATEST=""
+
+  # Read current version from pyproject.toml if present
+  if [[ -f "${DIR}/pyproject.toml" ]]; then
+    CURRENT=$(grep -m1 '^version' "${DIR}/pyproject.toml" | cut -d'"' -f2 || true)
+  fi
+
+  LATEST=$(curl -fsSL https://api.github.com/repos/Donkie/Spoolman/releases/latest \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])' 2>/dev/null || true)
+
+  if [[ -z "$LATEST" ]]; then
+    warn "Could not reach GitHub — skipping Spoolman update."
+    return
+  fi
+
+  local LATEST_VER="${LATEST#v}"
+  if [[ "$CURRENT" == "$LATEST_VER" ]]; then
+    info "Spoolman: already up to date (${CURRENT})."
+    return
+  fi
+
+  info "Spoolman: updating ${CURRENT:-unknown} → ${LATEST_VER}…"
+  systemctl stop spoolman
+
+  curl -fsSL "https://github.com/Donkie/Spoolman/releases/download/${LATEST}/spoolman.zip" \
+    -o /tmp/spoolman.zip
+  # Preserve .venv, .env, .uv-cache
+  rm -rf /tmp/spoolman_old
+  mkdir /tmp/spoolman_old
+  for d in .venv .uv-cache .env; do
+    [[ -e "${DIR}/${d}" ]] && mv "${DIR}/${d}" /tmp/spoolman_old/
+  done
+  rm -rf "${DIR}"
+  mkdir -p "${DIR}"
+  unzip -q /tmp/spoolman.zip -d "${DIR}"
+  rm -f /tmp/spoolman.zip
+  for d in .venv .uv-cache .env; do
+    [[ -e "/tmp/spoolman_old/${d}" ]] && mv "/tmp/spoolman_old/${d}" "${DIR}/"
+  done
+  rm -rf /tmp/spoolman_old
+
+  # Re-sync deps
+  UV_BIN="$(command -v uv 2>/dev/null || echo /usr/local/bin/uv)"
+  UV_CACHE_DIR="${DIR}/.uv-cache" "${UV_BIN}" --directory "${DIR}" sync --locked 2>/dev/null \
+    || UV_CACHE_DIR="${DIR}/.uv-cache" "${UV_BIN}" --directory "${DIR}" sync
+  chown -R spoolman:spoolman "${DIR}"
+
+  systemctl start spoolman
+  info "Spoolman: updated to ${LATEST_VER} and restarted."
+}
+
+update_openspoolman() {
+  section "Checking OpenSpoolMan"
+  local DIR="/opt/openspoolman"
 
   if [[ ! -d "${DIR}/.git" ]]; then
     warn "${DIR} is not a git repo — skipping."
@@ -471,27 +533,22 @@ update_repo() {
            git -C "${DIR}" rev-parse origin/main 2>/dev/null)
 
   if [[ "$BEFORE" == "$REMOTE" ]]; then
-    info "${NAME}: already up to date (${BEFORE:0:7})."
+    info "OpenSpoolMan: already up to date (${BEFORE:0:7})."
     return
   fi
 
-  info "${NAME}: update found (${BEFORE:0:7} → ${REMOTE:0:7}) — applying…"
-  systemctl stop "${SERVICE}"
-
+  info "OpenSpoolMan: update found (${BEFORE:0:7} → ${REMOTE:0:7}) — applying…"
+  systemctl stop openspoolman
   git -C "${DIR}" pull --ff-only --quiet
-
-  if [[ -f "${DIR}/requirements.txt" && -x "${DIR}/venv/bin/pip" ]]; then
-    info "Updating Python dependencies…"
-    "${DIR}/venv/bin/pip" install --quiet --upgrade pip
+  "${DIR}/venv/bin/pip" install --quiet --upgrade pip
+  [[ -f "${DIR}/requirements.txt" ]] && \
     "${DIR}/venv/bin/pip" install --quiet -r "${DIR}/requirements.txt"
-  fi
-
-  systemctl start "${SERVICE}"
-  info "${NAME}: updated and restarted."
+  systemctl start openspoolman
+  info "OpenSpoolMan: updated and restarted."
 }
 
-update_repo "Spoolman"     "/opt/spoolman"     "spoolman"
-update_repo "OpenSpoolMan" "/opt/openspoolman" "openspoolman"
+update_spoolman
+update_openspoolman
 
 section "Service status"
 systemctl --no-pager status spoolman openspoolman --lines=0
