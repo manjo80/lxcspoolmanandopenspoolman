@@ -303,8 +303,8 @@ info "Installing OpenSpoolMan dependencies"
 # OpenSpoolMan is a Flask (WSGI) app served by gunicorn.
 # Write config.env — this is the filename config.py loads via load_dotenv().
 cat > "${OSPOOL_DIR}/config.env" <<EOF
-OPENSPOOLMAN_BASE_URL=https://${OSPOOL_HOST}
-SPOOLMAN_BASE_URL=https://${SPOOL_HOST}
+OPENSPOOLMAN_BASE_URL=https://${SERVER_IP}:8443
+SPOOLMAN_BASE_URL=https://${SERVER_IP}
 REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 PORT=${OSPOOL_PORT}
 PRINTER_IP=${PRINTER_IP}
