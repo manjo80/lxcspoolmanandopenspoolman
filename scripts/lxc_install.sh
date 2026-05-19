@@ -195,7 +195,7 @@ fi
 if [[ -f "${SPOOL_DIR}/scripts/start.sh" || -f "${SPOOL_DIR}/pyproject.toml" ]]; then
   if ! command -v uv &>/dev/null; then
     info "Installing uv package manager"
-    pip3 install --quiet uv
+    pip3 install --quiet --break-system-packages uv
   fi
   UV_BIN="$(command -v uv)"
   UV_CACHE="${SPOOL_DIR}/.uv-cache"
