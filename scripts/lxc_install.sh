@@ -191,26 +191,37 @@ else
   git clone --depth 1 https://github.com/Donkie/Spoolman.git "${SPOOL_DIR}"
 fi
 
+# uv is required by both scripts/start.sh and pyproject.toml paths
+if [[ -f "${SPOOL_DIR}/scripts/start.sh" || -f "${SPOOL_DIR}/pyproject.toml" ]]; then
+  if ! command -v uv &>/dev/null; then
+    info "Installing uv package manager"
+    pip3 install --quiet --break-system-packages uv
+    # pip installs to /usr/local/bin but it may not be in PATH yet
+    hash -r 2>/dev/null || true
+  fi
+  UV_BIN="$(command -v uv 2>/dev/null || echo /usr/local/bin/uv)"
+  UV_CACHE="${SPOOL_DIR}/.uv-cache"
+  mkdir -p "${UV_CACHE}"
+  chown spoolman:spoolman "${UV_CACHE}"
+fi
+
 # Determine start method: prefer scripts/start.sh, then uv, then venv
 if [[ -f "${SPOOL_DIR}/scripts/start.sh" ]]; then
-  info "Using Spoolman's built-in start script"
+  info "Using Spoolman's built-in start script (uv-based)"
+  # uv sync must run from the project dir so .venv lands in ${SPOOL_DIR}
+  UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" --directory "${SPOOL_DIR}" sync --locked 2>/dev/null \
+    || UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" --directory "${SPOOL_DIR}" sync
   SPOOL_EXECSTART="/bin/bash ${SPOOL_DIR}/scripts/start.sh"
 
 elif [[ -f "${SPOOL_DIR}/pyproject.toml" ]]; then
-  info "Modern Spoolman detected (pyproject.toml) — installing uv"
-  pip3 install --quiet uv
-  UV_BIN="$(command -v uv)"
-  UV_CACHE="${SPOOL_DIR}/.uv-cache"
-  mkdir -p "${UV_CACHE}"
-  info "Syncing Spoolman dependencies with uv"
-  UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" sync --project "${SPOOL_DIR}" --locked 2>/dev/null \
-    || UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" sync --project "${SPOOL_DIR}"
+  info "Modern Spoolman (pyproject.toml) — syncing with uv"
+  UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" --directory "${SPOOL_DIR}" sync --locked 2>/dev/null \
+    || UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" --directory "${SPOOL_DIR}" sync
 
-  # Write wrapper so systemd can call it simply
   cat > "${SPOOL_DIR}/run.sh" <<RUNSCRIPT
 #!/usr/bin/env bash
 export UV_CACHE_DIR=${SPOOL_DIR}/.uv-cache
-exec ${UV_BIN} run --directory ${SPOOL_DIR} uvicorn spoolman.main:app --host 127.0.0.1 --port ${SPOOL_PORT}
+exec ${UV_BIN} --directory ${SPOOL_DIR} run uvicorn spoolman.main:app --host 127.0.0.1 --port ${SPOOL_PORT}
 RUNSCRIPT
   chmod +x "${SPOOL_DIR}/run.sh"
   SPOOL_EXECSTART="/bin/bash ${SPOOL_DIR}/run.sh"
@@ -244,6 +255,7 @@ Type=simple
 User=spoolman
 WorkingDirectory=${SPOOL_DIR}
 EnvironmentFile=${SPOOL_DIR}/.env
+Environment=UV_CACHE_DIR=${SPOOL_DIR}/.uv-cache
 ExecStart=${SPOOL_EXECSTART}
 Restart=on-failure
 RestartSec=5
@@ -279,6 +291,27 @@ info "Installing OpenSpoolMan dependencies"
 [[ -f "${OSPOOL_DIR}/requirements.txt" ]] && \
   "${OSPOOL_DIR}/venv/bin/pip" install --quiet -r "${OSPOOL_DIR}/requirements.txt"
 
+# Auto-detect uvicorn entry point (main:app, app:app, or package path)
+_detect_app() {
+  local dir="$1"
+  # Check root-level files first
+  for _f in main app run server; do
+    [[ -f "${dir}/${_f}.py" ]] && { echo "${_f}:app"; return; }
+  done
+  # Search for FastAPI() instantiation
+  local _match
+  _match=$(grep -rl "FastAPI()" "${dir}" --include="*.py" \
+    --exclude-dir=venv --exclude-dir=.git 2>/dev/null | head -1)
+  if [[ -n "$_match" ]]; then
+    local _rel="${_match#${dir}/}"
+    echo "$(echo "${_rel%.py}" | tr '/' '.'):app"
+    return
+  fi
+  echo "main:app"  # final fallback
+}
+OSPOOL_APP=$(_detect_app "${OSPOOL_DIR}")
+info "OpenSpoolMan entry point: ${OSPOOL_APP}"
+
 cat > "${OSPOOL_DIR}/.env" <<EOF
 BASE_URL=https://${OSPOOL_HOST}
 SPOOLMAN_URL=http://127.0.0.1:${SPOOL_PORT}
@@ -302,7 +335,7 @@ Type=simple
 User=openspoolman
 WorkingDirectory=${OSPOOL_DIR}
 EnvironmentFile=${OSPOOL_DIR}/.env
-ExecStart=${OSPOOL_DIR}/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port ${OSPOOL_PORT}
+ExecStart=${OSPOOL_DIR}/venv/bin/python -m uvicorn ${OSPOOL_APP} --host 127.0.0.1 --port ${OSPOOL_PORT}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
