@@ -191,9 +191,23 @@ else
   git clone --depth 1 https://github.com/Donkie/Spoolman.git "${SPOOL_DIR}"
 fi
 
+# uv is required by both scripts/start.sh and pyproject.toml paths
+if [[ -f "${SPOOL_DIR}/scripts/start.sh" || -f "${SPOOL_DIR}/pyproject.toml" ]]; then
+  if ! command -v uv &>/dev/null; then
+    info "Installing uv package manager"
+    pip3 install --quiet uv
+  fi
+  UV_BIN="$(command -v uv)"
+  UV_CACHE="${SPOOL_DIR}/.uv-cache"
+  mkdir -p "${UV_CACHE}"
+  chown spoolman:spoolman "${UV_CACHE}"
+fi
+
 # Determine start method: prefer scripts/start.sh, then uv, then venv
 if [[ -f "${SPOOL_DIR}/scripts/start.sh" ]]; then
-  info "Using Spoolman's built-in start script"
+  info "Using Spoolman's built-in start script (uv-based)"
+  UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" sync --project "${SPOOL_DIR}" --locked 2>/dev/null \
+    || UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" sync --project "${SPOOL_DIR}"
   SPOOL_EXECSTART="/bin/bash ${SPOOL_DIR}/scripts/start.sh"
 
 elif [[ -f "${SPOOL_DIR}/pyproject.toml" ]]; then
@@ -244,6 +258,7 @@ Type=simple
 User=spoolman
 WorkingDirectory=${SPOOL_DIR}
 EnvironmentFile=${SPOOL_DIR}/.env
+Environment=UV_CACHE_DIR=${SPOOL_DIR}/.uv-cache
 ExecStart=${SPOOL_EXECSTART}
 Restart=on-failure
 RestartSec=5
