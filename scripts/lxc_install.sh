@@ -297,32 +297,12 @@ fi
 
 info "Installing OpenSpoolMan dependencies"
 "${OSPOOL_DIR}/venv/bin/pip" install --quiet --upgrade pip
-"${OSPOOL_DIR}/venv/bin/pip" install --quiet "uvicorn[standard]"
 [[ -f "${OSPOOL_DIR}/requirements.txt" ]] && \
   "${OSPOOL_DIR}/venv/bin/pip" install --quiet -r "${OSPOOL_DIR}/requirements.txt"
 
-# Auto-detect uvicorn entry point (main:app, app:app, or package path)
-_detect_app() {
-  local dir="$1"
-  # Check root-level files first
-  for _f in main app run server; do
-    [[ -f "${dir}/${_f}.py" ]] && { echo "${_f}:app"; return; }
-  done
-  # Search for FastAPI() instantiation
-  local _match
-  _match=$(grep -rl "FastAPI()" "${dir}" --include="*.py" \
-    --exclude-dir=venv --exclude-dir=.git 2>/dev/null | head -1)
-  if [[ -n "$_match" ]]; then
-    local _rel="${_match#${dir}/}"
-    echo "$(echo "${_rel%.py}" | tr '/' '.'):app"
-    return
-  fi
-  echo "main:app"  # final fallback
-}
-OSPOOL_APP=$(_detect_app "${OSPOOL_DIR}")
-info "OpenSpoolMan entry point: ${OSPOOL_APP}"
-
-cat > "${OSPOOL_DIR}/.env" <<EOF
+# OpenSpoolMan is a Flask (WSGI) app served by gunicorn.
+# Write config.env — this is the filename config.py loads via load_dotenv().
+cat > "${OSPOOL_DIR}/config.env" <<EOF
 OPENSPOOLMAN_BASE_URL=https://${OSPOOL_HOST}
 SPOOLMAN_BASE_URL=http://127.0.0.1:${SPOOL_PORT}
 PORT=${OSPOOL_PORT}
@@ -330,8 +310,8 @@ PRINTER_IP=${PRINTER_IP}
 PRINTER_ID=${PRINTER_SERIAL}
 PRINTER_ACCESS_CODE=${ACCESS_CODE}
 EOF
-chmod 600 "${OSPOOL_DIR}/.env"
-chown openspoolman:openspoolman "${OSPOOL_DIR}/.env"
+chmod 600 "${OSPOOL_DIR}/config.env"
+chown openspoolman:openspoolman "${OSPOOL_DIR}/config.env"
 chown -R openspoolman:openspoolman "${OSPOOL_DIR}"
 
 # OpenSpoolMan is Docker-native and hardcodes /home/app for logs/data.
@@ -349,8 +329,8 @@ Requires=spoolman.service
 Type=simple
 User=openspoolman
 WorkingDirectory=${OSPOOL_DIR}
-EnvironmentFile=${OSPOOL_DIR}/.env
-ExecStart=${OSPOOL_DIR}/venv/bin/python -m uvicorn ${OSPOOL_APP} --host 127.0.0.1 --port ${OSPOOL_PORT}
+EnvironmentFile=${OSPOOL_DIR}/config.env
+ExecStart=${OSPOOL_DIR}/venv/bin/gunicorn -w 1 --threads 4 -b 127.0.0.1:${OSPOOL_PORT} app:app
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
