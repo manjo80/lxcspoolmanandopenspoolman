@@ -305,7 +305,7 @@ info "Installing OpenSpoolMan dependencies"
 cat > "${OSPOOL_DIR}/config.env" <<EOF
 OPENSPOOLMAN_BASE_URL=https://${SERVER_IP}:8443
 SPOOLMAN_BASE_URL=https://${SERVER_IP}
-REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+REQUESTS_CA_BUNDLE=/etc/ssl/spoolman-stack/ca.crt
 PORT=${OSPOOL_PORT}
 PRINTER_IP=${PRINTER_IP}
 PRINTER_ID=${PRINTER_SERIAL}
