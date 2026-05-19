@@ -659,7 +659,52 @@ systemctl enable nginx
 systemctl restart nginx
 
 # Brief pause to let services come up
-sleep 3
+sleep 5
+
+# ---------------------------------------------------------------------------
+# 8b. Spoolman custom fields (required by OpenSpoolMan)
+# ---------------------------------------------------------------------------
+section "Configuring Spoolman custom fields"
+
+_spoolman_field() {
+  local entity="$1" key="$2" name="$3" ftype="$4" extra="$5"
+  local url="http://127.0.0.1:${SPOOL_PORT}/api/v1/field/${entity}"
+  # Skip if field already exists
+  if curl -fsSL "${url}" | python3 -c "import sys,json; fields=json.load(sys.stdin); exit(0 if any(f['key']=='${key}' for f in fields) else 1)" 2>/dev/null; then
+    info "Field '${key}' on ${entity} already exists — skipping"
+    return
+  fi
+  local body="{\"key\":\"${key}\",\"name\":\"${name}\",\"field_type\":\"${ftype}\"${extra}}"
+  if curl -fsSL -X POST "${url}" \
+      -H "Content-Type: application/json" \
+      -d "${body}" -o /dev/null; then
+    info "Created field '${key}' on ${entity}"
+  else
+    warn "Could not create field '${key}' on ${entity} — add it manually in Spoolman settings"
+  fi
+}
+
+# Wait until Spoolman API is ready (max 30 s)
+_SPOOL_READY=0
+for _i in $(seq 1 30); do
+  if curl -fsSL "http://127.0.0.1:${SPOOL_PORT}/api/v1/info" -o /dev/null 2>/dev/null; then
+    _SPOOL_READY=1; break
+  fi
+  sleep 1
+done
+
+if [[ $_SPOOL_READY -eq 1 ]]; then
+  CHOICE_VALUES='"AERO,CF,GF,FR,Basic,HF,Translucent,Aero,Dynamic,Galaxy,Glow,Impact,Lite,Marble,Matte,Metal,Silk,Silk+,Sparkle,Tough,Tough+,Wood,Support for ABS,Support for PA PET,Support for PLA,Support for PLA-PETG,G,W,85A,90A,95A,95A HF,for AMS"'
+  # Filament fields
+  _spoolman_field "filament" "type"             "Type"               "choice"  ",\"choices\":${CHOICE_VALUES}"
+  _spoolman_field "filament" "nozzle_temperature" "Nozzle Temperature" "integer" ""
+  _spoolman_field "filament" "filament_id"      "Filament ID"        "text"    ""
+  # Spool fields
+  _spoolman_field "spool"    "tag"              "tag"                "text"    ""
+  _spoolman_field "spool"    "active_tray"      "Active Tray"        "text"    ""
+else
+  warn "Spoolman not reachable after 30 s — custom fields not created. Add them manually in Settings."
+fi
 
 # ---------------------------------------------------------------------------
 # 9. Summary
