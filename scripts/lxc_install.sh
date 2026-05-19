@@ -66,9 +66,9 @@ if [[ -z "${PRINTER_IP:-}" || -z "${PRINTER_SERIAL:-}" || -z "${ACCESS_CODE:-}" 
   ask OSPOOL_PORT   "Internal port for OpenSpoolMan"  "8000"
   echo
   info "Bambu printer credentials (required)"
-  ask PRINTER_IP     "Bambu printer IP"      ""
-  ask PRINTER_SERIAL "Bambu printer serial"  ""
-  ask ACCESS_CODE    "Bambu LAN access code" ""
+  ask PRINTER_IP     "Bambu printer IP"                          ""
+  ask PRINTER_SERIAL "Bambu printer ID (Settings → Device → Printer SN)" ""
+  ask ACCESS_CODE    "Bambu LAN access code (Settings → LAN Only Mode)"   ""
 
   SERVER_IP=$(hostname -I | awk '{print $1}')
   echo
@@ -323,12 +323,12 @@ OSPOOL_APP=$(_detect_app "${OSPOOL_DIR}")
 info "OpenSpoolMan entry point: ${OSPOOL_APP}"
 
 cat > "${OSPOOL_DIR}/.env" <<EOF
-BASE_URL=https://${OSPOOL_HOST}
-SPOOLMAN_URL=http://127.0.0.1:${SPOOL_PORT}
+OPENSPOOLMAN_BASE_URL=https://${OSPOOL_HOST}
+SPOOLMAN_BASE_URL=http://127.0.0.1:${SPOOL_PORT}
 PORT=${OSPOOL_PORT}
-BAMBU_PRINTER_IP=${PRINTER_IP}
-BAMBU_PRINTER_SERIAL=${PRINTER_SERIAL}
-BAMBU_ACCESS_CODE=${ACCESS_CODE}
+PRINTER_IP=${PRINTER_IP}
+PRINTER_ID=${PRINTER_SERIAL}
+PRINTER_ACCESS_CODE=${ACCESS_CODE}
 EOF
 chmod 600 "${OSPOOL_DIR}/.env"
 chown openspoolman:openspoolman "${OSPOOL_DIR}/.env"
