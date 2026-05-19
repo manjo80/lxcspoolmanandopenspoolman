@@ -196,8 +196,10 @@ if [[ -f "${SPOOL_DIR}/scripts/start.sh" || -f "${SPOOL_DIR}/pyproject.toml" ]];
   if ! command -v uv &>/dev/null; then
     info "Installing uv package manager"
     pip3 install --quiet --break-system-packages uv
+    # pip installs to /usr/local/bin but it may not be in PATH yet
+    hash -r 2>/dev/null || true
   fi
-  UV_BIN="$(command -v uv)"
+  UV_BIN="$(command -v uv 2>/dev/null || echo /usr/local/bin/uv)"
   UV_CACHE="${SPOOL_DIR}/.uv-cache"
   mkdir -p "${UV_CACHE}"
   chown spoolman:spoolman "${UV_CACHE}"
