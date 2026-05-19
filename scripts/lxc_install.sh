@@ -487,12 +487,62 @@ section() { echo -e "\n${BLUE}${BOLD}==> $*${NC}"; }
 
 [[ $EUID -ne 0 ]] && { echo -e "${RED}[ERROR]${NC} Run as root."; exit 1; }
 
+# ---------------------------------------------------------------------------
+# 1. System packages (apt)
+# ---------------------------------------------------------------------------
+update_system() {
+  section "Updating system packages"
+  export DEBIAN_FRONTEND=noninteractive
+  if ! apt-get update -q; then
+    warn "apt-get update failed — skipping system upgrade."
+    return
+  fi
+  local UPGRADABLE
+  UPGRADABLE=$(apt-get -s upgrade 2>/dev/null | grep -c "^Inst" || true)
+  if [[ "$UPGRADABLE" -eq 0 ]]; then
+    info "System: already up to date."
+    return
+  fi
+  info "System: upgrading ${UPGRADABLE} package(s)…"
+  apt-get upgrade -y -q --no-install-recommends
+  apt-get autoremove -y -q --purge
+  info "System: upgrade complete."
+  # Reload nginx in case it was upgraded
+  if systemctl is-active --quiet nginx; then
+    systemctl reload nginx && info "nginx: reloaded after system upgrade."
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 2. uv package manager
+# ---------------------------------------------------------------------------
+update_uv() {
+  section "Updating uv"
+  local UV_BIN
+  UV_BIN="$(command -v uv 2>/dev/null || echo /usr/local/bin/uv)"
+  if [[ ! -x "$UV_BIN" ]]; then
+    warn "uv not found — skipping."
+    return
+  fi
+  local BEFORE AFTER
+  BEFORE=$("$UV_BIN" --version 2>/dev/null || echo "unknown")
+  pip3 install --quiet --upgrade --break-system-packages uv 2>/dev/null || true
+  AFTER=$("$UV_BIN" --version 2>/dev/null || echo "unknown")
+  if [[ "$BEFORE" == "$AFTER" ]]; then
+    info "uv: already up to date (${BEFORE})."
+  else
+    info "uv: ${BEFORE} → ${AFTER}"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 3. Spoolman
+# ---------------------------------------------------------------------------
 update_spoolman() {
-  section "Checking Spoolman"
+  section "Updating Spoolman"
   local DIR="/opt/spoolman"
   local CURRENT="" LATEST=""
 
-  # Read current version from pyproject.toml if present
   if [[ -f "${DIR}/pyproject.toml" ]]; then
     CURRENT=$(grep -m1 '^version' "${DIR}/pyproject.toml" | cut -d'"' -f2 || true)
   fi
@@ -516,7 +566,7 @@ update_spoolman() {
 
   curl -fsSL "https://github.com/Donkie/Spoolman/releases/download/${LATEST}/spoolman.zip" \
     -o /tmp/spoolman.zip
-  # Preserve .venv, .env, .uv-cache
+  # Preserve .venv, .env, .uv-cache, scripts/start.sh data dir
   rm -rf /tmp/spoolman_old
   mkdir /tmp/spoolman_old
   for d in .venv .uv-cache .env; do
@@ -531,7 +581,6 @@ update_spoolman() {
   done
   rm -rf /tmp/spoolman_old
 
-  # Re-sync deps
   UV_BIN="$(command -v uv 2>/dev/null || echo /usr/local/bin/uv)"
   UV_CACHE_DIR="${DIR}/.uv-cache" "${UV_BIN}" --directory "${DIR}" sync --locked 2>/dev/null \
     || UV_CACHE_DIR="${DIR}/.uv-cache" "${UV_BIN}" --directory "${DIR}" sync
@@ -541,8 +590,11 @@ update_spoolman() {
   info "Spoolman: updated to ${LATEST_VER} and restarted."
 }
 
+# ---------------------------------------------------------------------------
+# 4. OpenSpoolMan
+# ---------------------------------------------------------------------------
 update_openspoolman() {
-  section "Checking OpenSpoolMan"
+  section "Updating OpenSpoolMan"
   local DIR="/opt/openspoolman"
 
   if [[ ! -d "${DIR}/.git" ]]; then
@@ -574,15 +626,20 @@ update_openspoolman() {
   info "OpenSpoolMan: updated and restarted."
 }
 
+# ---------------------------------------------------------------------------
+# Run all updates
+# ---------------------------------------------------------------------------
+update_system
+update_uv
 update_spoolman
 update_openspoolman
 
 section "Service status"
-systemctl --no-pager status spoolman openspoolman --lines=0
+systemctl --no-pager status spoolman openspoolman nginx --lines=5
 UPDATESCRIPT
 
 chmod +x /usr/local/bin/update
-info "'update' command installed — run it as root to update both services."
+info "'update' command installed — run it as root to update everything."
 
 # ---------------------------------------------------------------------------
 # 8. Enable and start services
