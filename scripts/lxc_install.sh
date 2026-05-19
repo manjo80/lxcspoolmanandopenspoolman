@@ -334,6 +334,11 @@ chmod 600 "${OSPOOL_DIR}/.env"
 chown openspoolman:openspoolman "${OSPOOL_DIR}/.env"
 chown -R openspoolman:openspoolman "${OSPOOL_DIR}"
 
+# OpenSpoolMan is Docker-native and hardcodes /home/app for logs/data.
+# Create that path and give the service user write access.
+mkdir -p /home/app/logs /home/app/data
+chown -R openspoolman:openspoolman /home/app
+
 cat > /etc/systemd/system/openspoolman.service <<EOF
 [Unit]
 Description=OpenSpoolMan Bambu bridge
@@ -351,7 +356,7 @@ RestartSec=5
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=${OSPOOL_DIR}
+ReadWritePaths=${OSPOOL_DIR} /home/app
 
 [Install]
 WantedBy=multi-user.target
