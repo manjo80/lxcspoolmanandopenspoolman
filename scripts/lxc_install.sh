@@ -371,7 +371,7 @@ mkdir -p /var/www/html
 cat > /etc/nginx/sites-available/spoolman <<EOF
 server {
     listen 443 ssl;
-    server_name ${SPOOL_HOST};
+    server_name ${SPOOL_HOST} ${SERVER_IP};
 
     ssl_certificate     ${SSL_DIR}/spoolman.crt;
     ssl_certificate_key ${SSL_DIR}/spoolman.key;
@@ -396,6 +396,33 @@ cat > /etc/nginx/sites-available/openspoolman <<EOF
 server {
     listen 443 ssl;
     server_name ${OSPOOL_HOST};
+
+    ssl_certificate     ${SSL_DIR}/openspoolman.crt;
+    ssl_certificate_key ${SSL_DIR}/openspoolman.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    add_header Permissions-Policy "nfc=*";
+
+    location / {
+        proxy_pass         http://127.0.0.1:${OSPOOL_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header   Host              \$host;
+        proxy_set_header   X-Real-IP         \$remote_addr;
+        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        proxy_set_header   Upgrade           \$http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+    }
+}
+EOF
+
+# OpenSpoolMan via IP on port 8443
+cat >> /etc/nginx/sites-available/openspoolman <<EOF
+
+server {
+    listen 8443 ssl;
+    server_name _;
 
     ssl_certificate     ${SSL_DIR}/openspoolman.crt;
     ssl_certificate_key ${SSL_DIR}/openspoolman.key;
