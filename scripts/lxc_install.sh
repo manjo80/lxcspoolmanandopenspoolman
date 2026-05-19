@@ -607,16 +607,18 @@ cat <<EOF
   Installation complete!
 ============================================================
 
-  Spoolman:
-    https://${SPOOL_HOST}
+  Per IP (kein DNS nötig):
+    https://${SERVER_IP}        → Spoolman
+    https://${SERVER_IP}:8443   → OpenSpoolMan
 
-  OpenSpoolMan:
+  Per Hostname (DNS erforderlich):
+    https://${SPOOL_HOST}
     https://${OSPOOL_HOST}
 
-  CA certificate (install this on your devices):
+  CA-Zertifikat (auf Geräten installieren):
     http://${SERVER_IP}:8080/spoolman-ca.crt
 
-  DNS entries to add:
+  DNS-Einträge:
     ${SPOOL_HOST}   →  ${SERVER_IP}
     ${OSPOOL_HOST}  →  ${SERVER_IP}
 
