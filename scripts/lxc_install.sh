@@ -195,7 +195,7 @@ else
     -o /tmp/spoolman.zip
   rm -rf "${SPOOL_DIR}"
   mkdir -p "${SPOOL_DIR}"
-  unzip -q /tmp/spoolman.zip -d "${SPOOL_DIR}"
+  python3 -m zipfile -e /tmp/spoolman.zip "${SPOOL_DIR}"
   rm -f /tmp/spoolman.zip
 fi
 
@@ -497,7 +497,7 @@ update_spoolman() {
   done
   rm -rf "${DIR}"
   mkdir -p "${DIR}"
-  unzip -q /tmp/spoolman.zip -d "${DIR}"
+  python3 -m zipfile -e /tmp/spoolman.zip "${DIR}"
   rm -f /tmp/spoolman.zip
   for d in .venv .uv-cache .env; do
     [[ -e "/tmp/spoolman_old/${d}" ]] && mv "/tmp/spoolman_old/${d}" "${DIR}/"
