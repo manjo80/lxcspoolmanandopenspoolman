@@ -94,10 +94,10 @@ fi
 # 1. System packages
 # ---------------------------------------------------------------------------
 section "Installing system packages"
-export DEBIAN_FRONTEND=noninteractive
+export DEBIAN_FRONTEND=noninteractive LC_ALL=C
 apt-get update -q
 apt-get install -y --no-install-recommends locales > /dev/null
-sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen > /dev/null
 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 apt-get install -y --no-install-recommends \
@@ -191,15 +191,38 @@ else
   git clone --depth 1 https://github.com/Donkie/Spoolman.git "${SPOOL_DIR}"
 fi
 
-if [[ ! -d "${SPOOL_DIR}/venv" ]]; then
-  info "Creating Python venv for Spoolman"
-  python3 -m venv "${SPOOL_DIR}/venv"
-fi
+# Determine start method: prefer scripts/start.sh, then uv, then venv
+if [[ -f "${SPOOL_DIR}/scripts/start.sh" ]]; then
+  info "Using Spoolman's built-in start script"
+  SPOOL_EXECSTART="/bin/bash ${SPOOL_DIR}/scripts/start.sh"
 
-info "Installing Python dependencies for Spoolman"
-"${SPOOL_DIR}/venv/bin/pip" install --quiet --upgrade pip
-if [[ -f "${SPOOL_DIR}/requirements.txt" ]]; then
-  "${SPOOL_DIR}/venv/bin/pip" install --quiet -r "${SPOOL_DIR}/requirements.txt"
+elif [[ -f "${SPOOL_DIR}/pyproject.toml" ]]; then
+  info "Modern Spoolman detected (pyproject.toml) — installing uv"
+  pip3 install --quiet uv
+  UV_BIN="$(command -v uv)"
+  UV_CACHE="${SPOOL_DIR}/.uv-cache"
+  mkdir -p "${UV_CACHE}"
+  info "Syncing Spoolman dependencies with uv"
+  UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" sync --project "${SPOOL_DIR}" --locked 2>/dev/null \
+    || UV_CACHE_DIR="${UV_CACHE}" "${UV_BIN}" sync --project "${SPOOL_DIR}"
+
+  # Write wrapper so systemd can call it simply
+  cat > "${SPOOL_DIR}/run.sh" <<RUNSCRIPT
+#!/usr/bin/env bash
+export UV_CACHE_DIR=${SPOOL_DIR}/.uv-cache
+exec ${UV_BIN} run --directory ${SPOOL_DIR} uvicorn spoolman.main:app --host 127.0.0.1 --port ${SPOOL_PORT}
+RUNSCRIPT
+  chmod +x "${SPOOL_DIR}/run.sh"
+  SPOOL_EXECSTART="/bin/bash ${SPOOL_DIR}/run.sh"
+
+else
+  info "Legacy Spoolman — using venv + pip"
+  [[ ! -d "${SPOOL_DIR}/venv" ]] && python3 -m venv "${SPOOL_DIR}/venv"
+  "${SPOOL_DIR}/venv/bin/pip" install --quiet --upgrade pip
+  "${SPOOL_DIR}/venv/bin/pip" install --quiet "uvicorn[standard]"
+  [[ -f "${SPOOL_DIR}/requirements.txt" ]] && \
+    "${SPOOL_DIR}/venv/bin/pip" install --quiet -r "${SPOOL_DIR}/requirements.txt"
+  SPOOL_EXECSTART="${SPOOL_DIR}/venv/bin/python -m uvicorn spoolman.main:app --host 127.0.0.1 --port ${SPOOL_PORT}"
 fi
 
 cat > "${SPOOL_DIR}/.env" <<EOF
@@ -221,13 +244,13 @@ Type=simple
 User=spoolman
 WorkingDirectory=${SPOOL_DIR}
 EnvironmentFile=${SPOOL_DIR}/.env
-ExecStart=${SPOOL_DIR}/venv/bin/python -m uvicorn spoolman.main:app --host 127.0.0.1 --port ${SPOOL_PORT}
+ExecStart=${SPOOL_EXECSTART}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=${SPOOL_DATA}
+ReadWritePaths=${SPOOL_DATA} ${SPOOL_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -248,16 +271,13 @@ else
   git clone --depth 1 https://github.com/drndos/openspoolman.git "${OSPOOL_DIR}"
 fi
 
-if [[ ! -d "${OSPOOL_DIR}/venv" ]]; then
-  info "Creating Python venv for OpenSpoolMan"
-  python3 -m venv "${OSPOOL_DIR}/venv"
-fi
+[[ ! -d "${OSPOOL_DIR}/venv" ]] && python3 -m venv "${OSPOOL_DIR}/venv"
 
-info "Installing Python dependencies for OpenSpoolMan"
+info "Installing OpenSpoolMan dependencies"
 "${OSPOOL_DIR}/venv/bin/pip" install --quiet --upgrade pip
-if [[ -f "${OSPOOL_DIR}/requirements.txt" ]]; then
+"${OSPOOL_DIR}/venv/bin/pip" install --quiet "uvicorn[standard]"
+[[ -f "${OSPOOL_DIR}/requirements.txt" ]] && \
   "${OSPOOL_DIR}/venv/bin/pip" install --quiet -r "${OSPOOL_DIR}/requirements.txt"
-fi
 
 cat > "${OSPOOL_DIR}/.env" <<EOF
 BASE_URL=https://${OSPOOL_HOST}
