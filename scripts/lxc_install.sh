@@ -304,7 +304,8 @@ info "Installing OpenSpoolMan dependencies"
 # Write config.env — this is the filename config.py loads via load_dotenv().
 cat > "${OSPOOL_DIR}/config.env" <<EOF
 OPENSPOOLMAN_BASE_URL=https://${OSPOOL_HOST}
-SPOOLMAN_BASE_URL=http://127.0.0.1:${SPOOL_PORT}
+SPOOLMAN_BASE_URL=https://${SPOOL_HOST}
+REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 PORT=${OSPOOL_PORT}
 PRINTER_IP=${PRINTER_IP}
 PRINTER_ID=${PRINTER_SERIAL}
