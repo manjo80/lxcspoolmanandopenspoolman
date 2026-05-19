@@ -153,9 +153,9 @@ ask OSPOOL_PORT  "Internal port for OpenSpoolMan"    "8000"
 
 echo
 info "Bambu printer credentials (required)"
-ask PRINTER_IP     "Bambu printer IP"       ""
-ask PRINTER_SERIAL "Bambu printer serial"   ""
-ask ACCESS_CODE    "Bambu LAN access code"  ""
+ask PRINTER_IP     "Bambu printer IP"                          ""
+ask PRINTER_SERIAL "Bambu printer ID (Settings → Device → Printer SN)" ""
+ask ACCESS_CODE    "Bambu LAN access code (Settings → LAN Only Mode)"   ""
 
 # ---------------------------------------------------------------------------
 # Confirmation
