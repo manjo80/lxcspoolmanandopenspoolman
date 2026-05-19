@@ -236,13 +236,11 @@ else
   SPOOL_EXECSTART="${SPOOL_DIR}/venv/bin/python -m uvicorn spoolman.main:app --host 127.0.0.1 --port ${SPOOL_PORT}"
 fi
 
-mkdir -p "${SPOOL_DIR}/.cache"
-
 cat > "${SPOOL_DIR}/.env" <<EOF
 SPOOLMAN_HOST=127.0.0.1
 SPOOLMAN_PORT=${SPOOL_PORT}
 SPOOLMAN_DB_PATH=${SPOOL_DATA}/spoolman.db
-SPOOLMAN_CACHE_DIR=${SPOOL_DIR}/.cache
+SPOOLMAN_DIR_DATA=${SPOOL_DATA}
 EOF
 chmod 600 "${SPOOL_DIR}/.env"
 chown spoolman:spoolman "${SPOOL_DIR}/.env"
@@ -259,7 +257,7 @@ User=spoolman
 WorkingDirectory=${SPOOL_DIR}
 EnvironmentFile=${SPOOL_DIR}/.env
 Environment=UV_CACHE_DIR=${SPOOL_DIR}/.uv-cache
-Environment=SPOOLMAN_CACHE_DIR=${SPOOL_DIR}/.cache
+Environment=SPOOLMAN_DIR_DATA=${SPOOL_DATA}
 ExecStart=${SPOOL_EXECSTART}
 Restart=on-failure
 RestartSec=5
