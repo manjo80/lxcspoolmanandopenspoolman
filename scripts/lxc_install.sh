@@ -203,7 +203,7 @@ fi
 if [[ -f "${SPOOL_DIR}/scripts/start.sh" || -f "${SPOOL_DIR}/pyproject.toml" ]]; then
   if ! command -v uv &>/dev/null; then
     info "Installing uv package manager"
-    pip3 install --quiet --break-system-packages uv
+    pip3 install --quiet --break-system-packages --root-user-action=ignore uv
     # pip installs to /usr/local/bin but it may not be in PATH yet
     hash -r 2>/dev/null || true
   fi
@@ -526,7 +526,7 @@ update_uv() {
   fi
   local BEFORE AFTER
   BEFORE=$("$UV_BIN" --version 2>/dev/null || echo "unknown")
-  pip3 install --quiet --upgrade --break-system-packages uv 2>/dev/null || true
+  pip3 install --quiet --upgrade --break-system-packages --root-user-action=ignore uv 2>/dev/null || true
   AFTER=$("$UV_BIN" --version 2>/dev/null || echo "unknown")
   if [[ "$BEFORE" == "$AFTER" ]]; then
     info "uv: already up to date (${BEFORE})."
