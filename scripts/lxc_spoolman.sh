@@ -42,6 +42,9 @@ apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------------------------
 section "Creating system user"
 id spoolman &>/dev/null || useradd --system --no-create-home --shell /usr/sbin/nologin spoolman
+SPOOL_DATA="/var/lib/spoolman"
+mkdir -p "${SPOOL_DATA}"
+chown spoolman:spoolman "${SPOOL_DATA}"
 
 # ---------------------------------------------------------------------------
 # 3. uv package manager
@@ -98,6 +101,7 @@ cat > "${SPOOL_DIR}/.env" <<EOF
 SPOOLMAN_HOST=0.0.0.0
 SPOOLMAN_PORT=${SPOOL_PORT}
 SPOOLMAN_LOGGING_LEVEL=WARNING
+SPOOLMAN_DIR_DATA=${SPOOL_DATA}
 EOF
 chmod 600 "${SPOOL_DIR}/.env"
 chown spoolman:spoolman "${SPOOL_DIR}/.env"
@@ -119,7 +123,7 @@ RestartSec=5
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=${SPOOL_DIR}
+ReadWritePaths=${SPOOL_DIR} ${SPOOL_DATA}
 
 [Install]
 WantedBy=multi-user.target
@@ -202,4 +206,4 @@ EOF
 echo -e "${NC}"
 
 section "Service status"
-systemctl --no-pager status spoolman --lines=5
+systemctl --no-pager status spoolman --lines=5 || true

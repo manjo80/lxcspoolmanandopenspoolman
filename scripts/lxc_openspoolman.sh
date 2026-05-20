@@ -261,4 +261,4 @@ EOF
 echo -e "${NC}"
 
 section "Service status"
-systemctl --no-pager status openspoolman nginx --lines=5
+systemctl --no-pager status openspoolman nginx --lines=5 || true
