@@ -129,7 +129,9 @@ if [[ ! -f "${SSL_DIR}/ca.key" ]]; then
   openssl req -new -x509 -days 3650 \
     -key "${SSL_DIR}/ca.key" \
     -out "${SSL_DIR}/ca.crt" \
-    -subj "/CN=Spoolman-Stack-CA/O=SpoolmanStack/C=DE"
+    -subj "/CN=Spoolman-Stack-CA/O=SpoolmanStack/C=DE" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign"
 fi
 
 make_cert() {
@@ -297,42 +299,27 @@ fi
 
 info "Installing OpenSpoolMan dependencies"
 "${OSPOOL_DIR}/venv/bin/pip" install --quiet --upgrade pip
-"${OSPOOL_DIR}/venv/bin/pip" install --quiet "uvicorn[standard]"
 [[ -f "${OSPOOL_DIR}/requirements.txt" ]] && \
   "${OSPOOL_DIR}/venv/bin/pip" install --quiet -r "${OSPOOL_DIR}/requirements.txt"
 
-# Auto-detect uvicorn entry point (main:app, app:app, or package path)
-_detect_app() {
-  local dir="$1"
-  # Check root-level files first
-  for _f in main app run server; do
-    [[ -f "${dir}/${_f}.py" ]] && { echo "${_f}:app"; return; }
-  done
-  # Search for FastAPI() instantiation
-  local _match
-  _match=$(grep -rl "FastAPI()" "${dir}" --include="*.py" \
-    --exclude-dir=venv --exclude-dir=.git 2>/dev/null | head -1)
-  if [[ -n "$_match" ]]; then
-    local _rel="${_match#${dir}/}"
-    echo "$(echo "${_rel%.py}" | tr '/' '.'):app"
-    return
-  fi
-  echo "main:app"  # final fallback
-}
-OSPOOL_APP=$(_detect_app "${OSPOOL_DIR}")
-info "OpenSpoolMan entry point: ${OSPOOL_APP}"
-
-cat > "${OSPOOL_DIR}/.env" <<EOF
-OPENSPOOLMAN_BASE_URL=https://${OSPOOL_HOST}
+# OpenSpoolMan is a Flask (WSGI) app served by gunicorn.
+# Write config.env — this is the filename config.py loads via load_dotenv().
+cat > "${OSPOOL_DIR}/config.env" <<EOF
+OPENSPOOLMAN_BASE_URL=https://${SERVER_IP}:8443
 SPOOLMAN_BASE_URL=http://127.0.0.1:${SPOOL_PORT}
 PORT=${OSPOOL_PORT}
 PRINTER_IP=${PRINTER_IP}
 PRINTER_ID=${PRINTER_SERIAL}
 PRINTER_ACCESS_CODE=${ACCESS_CODE}
 EOF
-chmod 600 "${OSPOOL_DIR}/.env"
-chown openspoolman:openspoolman "${OSPOOL_DIR}/.env"
+chmod 600 "${OSPOOL_DIR}/config.env"
+chown openspoolman:openspoolman "${OSPOOL_DIR}/config.env"
 chown -R openspoolman:openspoolman "${OSPOOL_DIR}"
+
+# OpenSpoolMan is Docker-native and hardcodes /home/app for logs/data.
+# Create that path and give the service user write access.
+mkdir -p /home/app/logs /home/app/data
+chown -R openspoolman:openspoolman /home/app
 
 cat > /etc/systemd/system/openspoolman.service <<EOF
 [Unit]
@@ -344,14 +331,14 @@ Requires=spoolman.service
 Type=simple
 User=openspoolman
 WorkingDirectory=${OSPOOL_DIR}
-EnvironmentFile=${OSPOOL_DIR}/.env
-ExecStart=${OSPOOL_DIR}/venv/bin/python -m uvicorn ${OSPOOL_APP} --host 127.0.0.1 --port ${OSPOOL_PORT}
+EnvironmentFile=${OSPOOL_DIR}/config.env
+ExecStart=${OSPOOL_DIR}/venv/bin/gunicorn -w 1 --threads 4 -b 127.0.0.1:${OSPOOL_PORT} app:app
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=${OSPOOL_DIR}
+ReadWritePaths=${OSPOOL_DIR} /home/app
 
 [Install]
 WantedBy=multi-user.target
@@ -654,7 +641,52 @@ systemctl enable nginx
 systemctl restart nginx
 
 # Brief pause to let services come up
-sleep 3
+sleep 5
+
+# ---------------------------------------------------------------------------
+# 8b. Spoolman custom fields (required by OpenSpoolMan)
+# ---------------------------------------------------------------------------
+section "Configuring Spoolman custom fields"
+
+_spoolman_field() {
+  local entity="$1" key="$2" name="$3" ftype="$4" extra="$5"
+  local url="http://127.0.0.1:${SPOOL_PORT}/api/v1/field/${entity}"
+  # Skip if field already exists
+  if curl -fsSL "${url}" | python3 -c "import sys,json; fields=json.load(sys.stdin); exit(0 if any(f['key']=='${key}' for f in fields) else 1)" 2>/dev/null; then
+    info "Field '${key}' on ${entity} already exists — skipping"
+    return
+  fi
+  local body="{\"key\":\"${key}\",\"name\":\"${name}\",\"field_type\":\"${ftype}\"${extra}}"
+  if curl -fsSL -X POST "${url}" \
+      -H "Content-Type: application/json" \
+      -d "${body}" -o /dev/null; then
+    info "Created field '${key}' on ${entity}"
+  else
+    warn "Could not create field '${key}' on ${entity} — add it manually in Spoolman settings"
+  fi
+}
+
+# Wait until Spoolman API is ready (max 30 s)
+_SPOOL_READY=0
+for _i in $(seq 1 30); do
+  if curl -fsSL "http://127.0.0.1:${SPOOL_PORT}/api/v1/info" -o /dev/null 2>/dev/null; then
+    _SPOOL_READY=1; break
+  fi
+  sleep 1
+done
+
+if [[ $_SPOOL_READY -eq 1 ]]; then
+  CHOICE_VALUES='"AERO,CF,GF,FR,Basic,HF,Translucent,Aero,Dynamic,Galaxy,Glow,Impact,Lite,Marble,Matte,Metal,Silk,Silk+,Sparkle,Tough,Tough+,Wood,Support for ABS,Support for PA PET,Support for PLA,Support for PLA-PETG,G,W,85A,90A,95A,95A HF,for AMS"'
+  # Filament fields
+  _spoolman_field "filament" "type"             "Type"               "choice"  ",\"choices\":${CHOICE_VALUES}"
+  _spoolman_field "filament" "nozzle_temperature" "Nozzle Temperature" "integer" ""
+  _spoolman_field "filament" "filament_id"      "Filament ID"        "text"    ""
+  # Spool fields
+  _spoolman_field "spool"    "tag"              "tag"                "text"    ""
+  _spoolman_field "spool"    "active_tray"      "Active Tray"        "text"    ""
+else
+  warn "Spoolman not reachable after 30 s — custom fields not created. Add them manually in Settings."
+fi
 
 # ---------------------------------------------------------------------------
 # 9. Summary
