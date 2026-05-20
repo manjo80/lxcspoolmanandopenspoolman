@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# install.sh — Proxmox host script for the Spoolman Stack LXC installer
+# install.sh — Proxmox host script: creates two separate LXC containers
+#   LXC 1: Spoolman (no nginx, plain HTTP on port 7912)
+#   LXC 2: OpenSpoolMan (nginx + self-signed SSL, connects to LXC 1)
 # Run on the Proxmox host:
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/Manjo80/spoolman-stack/main/install.sh)"
 set -euo pipefail
@@ -36,15 +38,15 @@ ask() {
 clear
 echo -e "${BLUE}${BOLD}"
 cat <<'BANNER'
- ____                  _                           ____  _             _    
+ ____                  _                           ____  _             _
 / ___| _ __   ___  ___| |_ __ _  ___ ___ _ __ ___|___ \| |_ __ _  ___| | __
 \___ \| '_ \ / _ \/ _ \ | '_ ` |/ _ | '_ ` _ \  __) | __/ _` |/ __| |/ /
- ___) | |_) |  __/  __/ | | | | (_| | | | | | |/ __/| || (_| | (__|   < 
+ ___) | |_) |  __/  __/ | | | | (_| | | | | | |/ __/| || (_| | (__|   <
 |____/| .__/ \___|\___|_|_| |_|\__,_|_| |_| |_|_____\_\__\__,_|\___|_|\_\
-      |_|                                                                    
+      |_|
 BANNER
 echo -e "${NC}"
-echo -e "${BOLD}  Spoolman + OpenSpoolMan — Proxmox LXC Installer${NC}"
+echo -e "${BOLD}  Spoolman + OpenSpoolMan — Proxmox LXC Installer (2-container)${NC}"
 echo    "  github.com/Manjo80/spoolman-stack"
 echo
 
@@ -60,17 +62,35 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Spoolman LXC Configuration
 # ---------------------------------------------------------------------------
-section "LXC Container Configuration"
+section "Spoolman LXC Configuration"
 
 NEXT_ID=$(pvesh get /cluster/nextid 2>/dev/null || echo "200")
 
-ask CTID       "Container ID"        "${NEXT_ID}"
-ask HOSTNAME   "LXC hostname"        "spoolman"
-ask RAM        "RAM (MB)"            "1024"
-ask CORES      "CPU cores"           "2"
-ask DISK       "Disk size (GB)"      "8"
+ask CTID1      "Container ID (Spoolman)"          "${NEXT_ID}"
+ask HOSTNAME1  "LXC hostname (Spoolman)"          "spoolman"
+ask RAM1       "RAM (MB)"                         "512"
+ask CORES1     "CPU cores"                        "1"
+ask DISK1      "Disk size (GB)"                   "4"
+
+# ---------------------------------------------------------------------------
+# OpenSpoolMan LXC Configuration
+# ---------------------------------------------------------------------------
+section "OpenSpoolMan LXC Configuration"
+
+NEXT_ID2=$(( CTID1 + 1 ))
+
+ask CTID2      "Container ID (OpenSpoolMan)"      "${NEXT_ID2}"
+ask HOSTNAME2  "LXC hostname (OpenSpoolMan)"      "openspoolman"
+ask RAM2       "RAM (MB)"                         "512"
+ask CORES2     "CPU cores"                        "1"
+ask DISK2      "Disk size (GB)"                   "4"
+
+# ---------------------------------------------------------------------------
+# Shared: storage + bridge
+# ---------------------------------------------------------------------------
+section "Shared Network & Storage Configuration"
 
 # Storage picker — list every active rootdir-capable storage with free space
 mapfile -t _STOR_ROWS < <(
@@ -96,77 +116,94 @@ fi
 IFS='|' read -r STORAGE _ <<< "${_STOR_ROWS[$((_SC-1))]}"
 info "Using storage: ${STORAGE}"
 
-ask BRIDGE     "Network bridge"      "vmbr0"
+ask BRIDGE     "Network bridge"                   "vmbr0"
 
+# ---------------------------------------------------------------------------
+# Network config for each container
+# ---------------------------------------------------------------------------
 echo
-echo -e "${CYAN}IP configuration:${NC}"
+echo -e "${CYAN}IP configuration for Spoolman LXC (CT${CTID1}):${NC}"
 echo    "  1) DHCP"
 echo    "  2) Static"
-read -rp "$(echo -e "${CYAN}Choice${NC} [1]: ")" IP_CHOICE
-IP_CHOICE=${IP_CHOICE:-1}
+read -rp "$(echo -e "${CYAN}Choice${NC} [1]: ")" IP_CHOICE1
+IP_CHOICE1=${IP_CHOICE1:-1}
 
-if [[ "$IP_CHOICE" == "2" ]]; then
-  ask CT_IP  "Container IP (CIDR, e.g. 192.168.1.50/24)" ""
-  ask CT_GW  "Gateway"                                    ""
-  ask CT_DNS "DNS server"                                  "8.8.8.8"
-  NET_CONFIG="ip=${CT_IP},gw=${CT_GW}"
-  DNS_CONFIG="--nameserver ${CT_DNS}"
+if [[ "$IP_CHOICE1" == "2" ]]; then
+  ask CT1_IP  "Spoolman IP (CIDR, e.g. 192.168.1.50/24)" ""
+  ask CT1_GW  "Gateway"                                   ""
+  ask CT1_DNS "DNS server"                                 "8.8.8.8"
+  CT1_NET_CONFIG="ip=${CT1_IP},gw=${CT1_GW}"
+  CT1_DNS_CONFIG="--nameserver ${CT1_DNS}"
 else
-  NET_CONFIG="ip=dhcp"
-  DNS_CONFIG=""
+  CT1_NET_CONFIG="ip=dhcp"
+  CT1_DNS_CONFIG=""
 fi
 
 echo
-echo -e "${CYAN}Root login:${NC}"
-echo    "  1) Enable root login with password"
-echo    "  2) Disable root login (SSH key only)"
-read -rp "$(echo -e "${CYAN}Choice${NC} [1]: ")" ROOT_CHOICE
-ROOT_CHOICE=${ROOT_CHOICE:-1}
+echo -e "${CYAN}IP configuration for OpenSpoolMan LXC (CT${CTID2}):${NC}"
+echo    "  1) DHCP"
+echo    "  2) Static"
+read -rp "$(echo -e "${CYAN}Choice${NC} [1]: ")" IP_CHOICE2
+IP_CHOICE2=${IP_CHOICE2:-1}
 
-ROOT_PW=""
-if [[ "$ROOT_CHOICE" == "1" ]]; then
-  while true; do
-    read -rsp "$(echo -e "${CYAN}Root password${NC}: ")" ROOT_PW; echo
-    [[ -n "$ROOT_PW" ]] && break
-    warn "Password must not be empty."
-  done
-  while true; do
-    read -rsp "$(echo -e "${CYAN}Confirm root password${NC}: ")" ROOT_PW2; echo
-    [[ "$ROOT_PW" == "$ROOT_PW2" ]] && break
-    warn "Passwords do not match — try again."
-    read -rsp "$(echo -e "${CYAN}Root password${NC}: ")" ROOT_PW; echo
-  done
-  info "Root login: enabled"
+if [[ "$IP_CHOICE2" == "2" ]]; then
+  ask CT2_IP  "OpenSpoolMan IP (CIDR, e.g. 192.168.1.51/24)" ""
+  ask CT2_GW  "Gateway"                                      ""
+  ask CT2_DNS "DNS server"                                    "8.8.8.8"
+  CT2_NET_CONFIG="ip=${CT2_IP},gw=${CT2_GW}"
+  CT2_DNS_CONFIG="--nameserver ${CT2_DNS}"
 else
-  info "Root login: disabled"
+  CT2_NET_CONFIG="ip=dhcp"
+  CT2_DNS_CONFIG=""
 fi
 
 # ---------------------------------------------------------------------------
-# Spoolman stack configuration
+# Root password (shared for both containers)
 # ---------------------------------------------------------------------------
-section "Spoolman Stack Configuration"
+echo
+echo -e "${CYAN}Root password (used for both containers):${NC}"
+while true; do
+  read -rsp "$(echo -e "${CYAN}Root password${NC}: ")" ROOT_PW; echo
+  [[ -n "$ROOT_PW" ]] && break
+  warn "Password must not be empty."
+done
+while true; do
+  read -rsp "$(echo -e "${CYAN}Confirm root password${NC}: ")" ROOT_PW2; echo
+  [[ "$ROOT_PW" == "$ROOT_PW2" ]] && break
+  warn "Passwords do not match — try again."
+  read -rsp "$(echo -e "${CYAN}Root password${NC}: ")" ROOT_PW; echo
+done
+info "Root password set."
 
-ask SPOOL_HOST   "Hostname for Spoolman (DNS)"       "spoolman.home"
+# ---------------------------------------------------------------------------
+# Stack Configuration
+# ---------------------------------------------------------------------------
+section "Stack Configuration"
+
 ask OSPOOL_HOST  "Hostname for OpenSpoolMan (DNS)"   "openspoolman.home"
-ask SPOOL_PORT   "Internal port for Spoolman"        "7912"
-ask OSPOOL_PORT  "Internal port for OpenSpoolMan"    "8000"
+ask SPOOL_PORT   "Spoolman port"                     "7912"
+ask OSPOOL_PORT  "OpenSpoolMan internal port"        "8000"
 
 echo
 info "Bambu printer credentials (required)"
-ask PRINTER_IP     "Bambu printer IP"                          ""
-ask PRINTER_SERIAL "Bambu printer ID (Settings → Device → Printer SN)" ""
-ask ACCESS_CODE    "Bambu LAN access code (Settings → LAN Only Mode)"   ""
+ask PRINTER_IP     "Bambu printer IP"                                    ""
+ask PRINTER_SERIAL "Bambu printer ID (Settings → Device → Printer SN)"  ""
+ask ACCESS_CODE    "Bambu LAN access code (Settings → LAN Only Mode)"    ""
 
 # ---------------------------------------------------------------------------
-# Confirmation
+# Confirmation summary
 # ---------------------------------------------------------------------------
 echo
 echo -e "${BOLD}Summary:${NC}"
-echo    "  Container ID  : ${CTID}  (${CORES} cores, ${RAM} MB RAM, ${DISK} GB on ${STORAGE})"
-echo    "  Hostname      : ${HOSTNAME}  bridge ${BRIDGE}  net ${NET_CONFIG}"
-echo    "  Root login    : $( [[ -n "$ROOT_PW" ]] && echo enabled || echo disabled )"
-echo    "  Spoolman      : https://${SPOOL_HOST}  (internal :${SPOOL_PORT})"
+echo    "  --- Spoolman LXC ---"
+echo    "  Container ID  : ${CTID1}  (${CORES1} cores, ${RAM1} MB RAM, ${DISK1} GB on ${STORAGE})"
+echo    "  Hostname      : ${HOSTNAME1}  bridge ${BRIDGE}  net ${CT1_NET_CONFIG}"
+echo    "  Spoolman port : ${SPOOL_PORT}"
+echo    "  --- OpenSpoolMan LXC ---"
+echo    "  Container ID  : ${CTID2}  (${CORES2} cores, ${RAM2} MB RAM, ${DISK2} GB on ${STORAGE})"
+echo    "  Hostname      : ${HOSTNAME2}  bridge ${BRIDGE}  net ${CT2_NET_CONFIG}"
 echo    "  OpenSpoolMan  : https://${OSPOOL_HOST}  (internal :${OSPOOL_PORT})"
+echo    "  --- Shared ---"
 echo    "  Printer IP    : ${PRINTER_IP}"
 echo    "  Serial        : ${PRINTER_SERIAL}"
 echo    "  Access code   : ${ACCESS_CODE}"
@@ -175,7 +212,7 @@ read -rp "$(echo -e "${YELLOW}Proceed? [y/N]: ${NC}")" _CONFIRM
 [[ "${_CONFIRM,,}" =~ ^y ]] || { info "Aborted."; exit 0; }
 
 # ---------------------------------------------------------------------------
-# Detect template storage (first storage that supports vztmpl content)
+# Template detection (shared between both containers)
 # ---------------------------------------------------------------------------
 section "Detecting template storage"
 
@@ -186,9 +223,6 @@ if [[ -z "${TMPL_STORAGE}" ]]; then
 fi
 info "Using template storage: ${TMPL_STORAGE}"
 
-# ---------------------------------------------------------------------------
-# Debian 13 template
-# ---------------------------------------------------------------------------
 section "Checking Debian 13 template"
 
 pveam update
@@ -211,61 +245,120 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Create LXC container
+# Create LXC 1 — Spoolman
 # ---------------------------------------------------------------------------
-section "Creating LXC container ${CTID}"
+section "Creating Spoolman LXC (CT${CTID1})"
 
-if pct status "${CTID}" &>/dev/null; then
-  warn "Container ${CTID} already exists — skipping creation."
+if pct status "${CTID1}" &>/dev/null; then
+  warn "Container ${CTID1} already exists — skipping creation."
 else
-  PCT_ARGS=(
-    "${CTID}" "${TEMPLATE_PATH}"
-    --hostname  "${HOSTNAME}"
-    --memory    "${RAM}"
-    --cores     "${CORES}"
-    --rootfs    "${STORAGE}:${DISK}"
-    --net0      "name=eth0,bridge=${BRIDGE},${NET_CONFIG}"
+  PCT_ARGS1=(
+    "${CTID1}" "${TEMPLATE_PATH}"
+    --hostname  "${HOSTNAME1}"
+    --memory    "${RAM1}"
+    --cores     "${CORES1}"
+    --rootfs    "${STORAGE}:${DISK1}"
+    --net0      "name=eth0,bridge=${BRIDGE},${CT1_NET_CONFIG}"
     --ostype    debian
     --unprivileged 1
     --features  nesting=1
+    --password  "${ROOT_PW}"
   )
-  [[ -n "$ROOT_PW" ]] && PCT_ARGS+=(--password "${ROOT_PW}")
   # shellcheck disable=SC2086
-  [[ -n "$DNS_CONFIG" ]] && PCT_ARGS+=(${DNS_CONFIG})
-  pct create "${PCT_ARGS[@]}"
-  info "Container ${CTID} created."
+  [[ -n "${CT1_DNS_CONFIG}" ]] && PCT_ARGS1+=(${CT1_DNS_CONFIG})
+  pct create "${PCT_ARGS1[@]}"
+  info "Container ${CTID1} created."
 fi
 
 # ---------------------------------------------------------------------------
-# Start and wait
+# Create LXC 2 — OpenSpoolMan
 # ---------------------------------------------------------------------------
-section "Starting container"
+section "Creating OpenSpoolMan LXC (CT${CTID2})"
 
-if [[ $(pct status "${CTID}" | awk '{print $2}') != "running" ]]; then
-  pct start "${CTID}"
+if pct status "${CTID2}" &>/dev/null; then
+  warn "Container ${CTID2} already exists — skipping creation."
+else
+  PCT_ARGS2=(
+    "${CTID2}" "${TEMPLATE_PATH}"
+    --hostname  "${HOSTNAME2}"
+    --memory    "${RAM2}"
+    --cores     "${CORES2}"
+    --rootfs    "${STORAGE}:${DISK2}"
+    --net0      "name=eth0,bridge=${BRIDGE},${CT2_NET_CONFIG}"
+    --ostype    debian
+    --unprivileged 1
+    --features  nesting=1
+    --password  "${ROOT_PW}"
+  )
+  # shellcheck disable=SC2086
+  [[ -n "${CT2_DNS_CONFIG}" ]] && PCT_ARGS2+=(${CT2_DNS_CONFIG})
+  pct create "${PCT_ARGS2[@]}"
+  info "Container ${CTID2} created."
 fi
 
-info "Waiting for container to become ready…"
+# ---------------------------------------------------------------------------
+# Start LXC 1, wait for ready, install Spoolman
+# ---------------------------------------------------------------------------
+section "Starting Spoolman container (CT${CTID1})"
+
+if [[ $(pct status "${CTID1}" | awk '{print $2}') != "running" ]]; then
+  pct start "${CTID1}"
+fi
+
+info "Waiting for Spoolman container to become ready…"
 for i in $(seq 1 30); do
-  if pct exec "${CTID}" -- true &>/dev/null 2>&1; then
-    info "Container ready (${i}s)."
-    break
+  if pct exec "${CTID1}" -- true &>/dev/null 2>&1; then
+    info "Container ${CTID1} ready (${i}s)."; break
   fi
   sleep 1
 done
 
-# ---------------------------------------------------------------------------
-# Run installer inside container
-# ---------------------------------------------------------------------------
-section "Running stack installer inside container"
+section "Running Spoolman installer inside CT${CTID1}"
 
-LXC_SCRIPT_URL="https://raw.githubusercontent.com/Manjo80/lxcspoolmanandopenspoolman/main/scripts/lxc_install.sh"
+LXC_SPOOLMAN_URL="https://raw.githubusercontent.com/Manjo80/lxcspoolmanandopenspoolman/main/scripts/lxc_spoolman.sh"
 
-pct exec "${CTID}" -- env \
+pct exec "${CTID1}" -- env \
   DEBIAN_FRONTEND=noninteractive \
-  SPOOL_HOST="${SPOOL_HOST}" \
-  OSPOOL_HOST="${OSPOOL_HOST}" \
   SPOOL_PORT="${SPOOL_PORT}" \
+  bash -c "
+    set -euo pipefail
+    apt-get update -q
+    apt-get install -y --no-install-recommends curl ca-certificates > /dev/null
+    curl -fsSL '${LXC_SPOOLMAN_URL}' -o /tmp/lxc_spoolman.sh
+    bash /tmp/lxc_spoolman.sh
+    rm -f /tmp/lxc_spoolman.sh
+  "
+
+# Get Spoolman IP so OpenSpoolMan can reach it
+SPOOLMAN_IP=$(pct exec "${CTID1}" -- hostname -I 2>/dev/null | awk '{print $1}')
+info "Spoolman IP: ${SPOOLMAN_IP}"
+
+# ---------------------------------------------------------------------------
+# Start LXC 2, wait for ready, install OpenSpoolMan
+# ---------------------------------------------------------------------------
+section "Starting OpenSpoolMan container (CT${CTID2})"
+
+if [[ $(pct status "${CTID2}" | awk '{print $2}') != "running" ]]; then
+  pct start "${CTID2}"
+fi
+
+info "Waiting for OpenSpoolMan container to become ready…"
+for i in $(seq 1 30); do
+  if pct exec "${CTID2}" -- true &>/dev/null 2>&1; then
+    info "Container ${CTID2} ready (${i}s)."; break
+  fi
+  sleep 1
+done
+
+section "Running OpenSpoolMan installer inside CT${CTID2}"
+
+LXC_OSPOOL_URL="https://raw.githubusercontent.com/Manjo80/lxcspoolmanandopenspoolman/main/scripts/lxc_openspoolman.sh"
+
+pct exec "${CTID2}" -- env \
+  DEBIAN_FRONTEND=noninteractive \
+  SPOOLMAN_IP="${SPOOLMAN_IP}" \
+  SPOOL_PORT="${SPOOL_PORT}" \
+  OSPOOL_HOST="${OSPOOL_HOST}" \
   OSPOOL_PORT="${OSPOOL_PORT}" \
   PRINTER_IP="${PRINTER_IP}" \
   PRINTER_SERIAL="${PRINTER_SERIAL}" \
@@ -274,16 +367,16 @@ pct exec "${CTID}" -- env \
     set -euo pipefail
     apt-get update -q
     apt-get install -y --no-install-recommends curl ca-certificates > /dev/null
-    curl -fsSL '${LXC_SCRIPT_URL}' -o /tmp/lxc_install.sh
-    bash /tmp/lxc_install.sh
-    rm -f /tmp/lxc_install.sh
+    curl -fsSL '${LXC_OSPOOL_URL}' -o /tmp/lxc_openspoolman.sh
+    bash /tmp/lxc_openspoolman.sh
+    rm -f /tmp/lxc_openspoolman.sh
   "
 
-# ---------------------------------------------------------------------------
-# Host-side summary
-# ---------------------------------------------------------------------------
-CT_IP_ACTUAL=$(pct exec "${CTID}" -- hostname -I 2>/dev/null | awk '{print $1}' || echo "<container-ip>")
+OSPOOL_IP=$(pct exec "${CTID2}" -- hostname -I 2>/dev/null | awk '{print $1}')
 
+# ---------------------------------------------------------------------------
+# Final summary
+# ---------------------------------------------------------------------------
 echo
 echo -e "${GREEN}${BOLD}"
 cat <<EOF
@@ -291,12 +384,23 @@ cat <<EOF
   Proxmox LXC deployment complete
 ============================================================
 
-  Container ID : ${CTID}
-  Hostname     : ${HOSTNAME}
-  IP address   : ${CT_IP_ACTUAL}
+  Spoolman (CT${CTID1})
+    Hostname  : ${HOSTNAME1}
+    IP        : ${SPOOLMAN_IP}
+    URL       : http://${SPOOLMAN_IP}:${SPOOL_PORT}
 
-  Open the stack URLs shown above in your browser.
-  Install the CA certificate to trust HTTPS.
+  OpenSpoolMan (CT${CTID2})
+    Hostname  : ${HOSTNAME2}
+    IP        : ${OSPOOL_IP}
+    URL       : https://${OSPOOL_IP}
+    CA cert   : http://${OSPOOL_IP}:8080/spoolman-ca.crt
+
+  /etc/hosts entries (on your client machines):
+    ${SPOOLMAN_IP}  ${HOSTNAME1}.home
+    ${OSPOOL_IP}  ${OSPOOL_HOST}
+
+  Install the CA certificate to trust HTTPS on OpenSpoolMan.
+  Download it from: http://${OSPOOL_IP}:8080/spoolman-ca.crt
 
 ============================================================
 EOF
